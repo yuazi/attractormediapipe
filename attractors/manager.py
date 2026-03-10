@@ -9,6 +9,7 @@ import numpy as np
 from config import CAMERA_DISTANCE, CAMERA_FOV, TRAIL_BUFFER_CAPACITY
 
 from .aizawa import AizawaAttractor
+from .chen import ChenAttractor
 from .dadras import DadrasAttractor
 from .halvorsen import HalvorsenAttractor
 from .lorenz import LorenzAttractor
@@ -25,6 +26,7 @@ ATTRACTOR_TYPES = (
     DadrasAttractor,
     AizawaAttractor,
     SprottBAttractor,
+    ChenAttractor,
 )
 
 PLACARD_MEDIUM = "Generative computation, real-time\nrendering on custom software"
@@ -68,6 +70,12 @@ PLACARD_OVERRIDES = {
         year="J. C. Sprott, 1994",
         medium=PLACARD_MEDIUM,
         params=(("type", "conservative"), ("class", "B"), ("dim", "3")),
+    ),
+    "Chen": PlacardData(
+        title="Chen Attractor",
+        year="G. Chen and T. Ueta, 1999",
+        medium=PLACARD_MEDIUM,
+        params=(("a", "35.000"), ("b", "3.000"), ("c", "28.000")),
     ),
 }
 

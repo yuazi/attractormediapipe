@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from attractors.aizawa import AizawaAttractor
+from attractors.chen import ChenAttractor
 from attractors.dadras import DadrasAttractor
 from attractors.halvorsen import HalvorsenAttractor
 from attractors.lorenz import LorenzAttractor
@@ -24,12 +25,18 @@ class AttractorTests(unittest.TestCase):
             DadrasAttractor(),
             AizawaAttractor(),
             SprottBAttractor(),
+            ChenAttractor(),
         ]
         for attractor in attractors:
             for _ in range(120):
                 point = attractor.step(0.005)
                 self.assertEqual(point.shape, (3,))
                 self.assertTrue(np.isfinite(point).all(), attractor.name)
+
+    def test_manager_exposes_chen_in_navigation(self) -> None:
+        manager = AttractorManager()
+        self.assertEqual(manager.total, 8)
+        self.assertEqual(manager.names[-1], "Chen")
 
     def test_manager_projection_shapes_are_stable(self) -> None:
         manager = AttractorManager()

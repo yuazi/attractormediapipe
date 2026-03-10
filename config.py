@@ -75,19 +75,19 @@ CAPTION = "(y)us particle attractor"
 SCREENSHOT_PREFIX = "attractor"
 
 HELP_LINES = [
-    "RIGHT HAND",
+    "LEFT HAND",
     "Palm X -> Yaw",
     "Palm Y -> Pitch",
     "Pinch -> Speed",
     "Pinky touch palm -> Previous attractor",
     "",
-    "LEFT HAND",
+    "RIGHT HAND",
     "Index Y -> Luminosity",
     "Pinch -> Scale / zoom",
     "Pinky touch palm -> Next attractor",
     "",
     "KEYS",
-    "[1-7] switch  [R] reset  [B] bloom",
+    "[1-8] switch  [R] reset  [B] bloom",
     "[H] overlay  [C] camera  [S] screenshot",
     "[M] focus mode",
     "[ESC] quit",
@@ -111,4 +111,5 @@ ATTRACTOR_SPECS = (
     AttractorSpec("Dadras", (170, 68, 255), 1.0),
     AttractorSpec("Aizawa", (224, 232, 255), 2.0),
     AttractorSpec("Sprott B", (255, 34, 85), 1.2),
+    AttractorSpec("Chen", (255, 122, 90), 1.0),
 )

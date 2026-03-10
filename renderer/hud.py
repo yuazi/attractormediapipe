@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 import os
 from typing import Dict, Sequence, Tuple
 
@@ -32,6 +33,7 @@ CONTROL_SLIDERS = (
     ("luminosity", "Luminosity", LUMINOSITY_RANGE[0], LUMINOSITY_RANGE[1], 0.01),
     ("scale", "Scale", SCALE_RANGE[0], SCALE_RANGE[1], 0.05),
 )
+SURFACE_CACHE_LIMIT = 512
 
 
 class HUDRenderer:
@@ -41,7 +43,7 @@ class HUDRenderer:
         self.scale = max(0.62, min(width / 1920.0, height / 1080.0))
         self._navigation_count = 7
         self._font_cache: Dict[Tuple[int, str], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
-        self._surface_cache: Dict[Tuple[str, Tuple[int, int, int], int, str], pygame.Surface] = {}
+        self._surface_cache: OrderedDict[Tuple[str, Tuple[int, int, int], int, str], pygame.Surface] = OrderedDict()
         assets_fonts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
         home_fonts_dir = os.path.expanduser("~/Library/Fonts")
         self._font_candidates = {
@@ -184,7 +186,13 @@ class HUDRenderer:
         gap = self._scaled(22)
         for idx, label in enumerate(labels):
             label_surface = self._render_text(label, HUD_MUTED, self._scaled(13), "mono")
-            value_surface = self._render_text(f"{attractor_state[idx]:>7.3f}", HUD_TEXT, self._scaled(22), "mono")
+            value_surface = self._render_text(
+                f"{attractor_state[idx]:>7.3f}",
+                HUD_TEXT,
+                self._scaled(22),
+                "mono",
+                cache=False,
+            )
             surface.blit(label_surface, (x, y))
             surface.blit(value_surface, (x, y + label_surface.get_height() + self._scaled(8)))
             x += max(label_surface.get_width(), value_surface.get_width()) + gap
@@ -270,7 +278,13 @@ class HUDRenderer:
 
         for label, value in display_rows:
             label_surface = self._render_text(label, HUD_MUTED, self._scaled(14), "mono")
-            value_surface = self._render_text(value, HUD_TEXT, self._scaled(15), "mono")
+            value_surface = self._render_text(
+                value,
+                HUD_TEXT,
+                self._scaled(15),
+                "mono",
+                cache=label not in {"particles", "points"},
+            )
             surface.blit(label_surface, (x, cursor_y))
             surface.blit(value_surface, (x + placard_width - value_surface.get_width(), cursor_y - self._scaled(1)))
             cursor_y += row_height
@@ -307,7 +321,13 @@ class HUDRenderer:
             track = tracks[slider_id]
             row_top = track.top - self._scaled(24)
             label_surface = self._render_text(label, HUD_TEXT, self._scaled(15), "serif_italic")
-            value_surface = self._render_text(self._format_slider_value(slider_id, values[slider_id]), HUD_BAR_FILL, self._scaled(13), "mono")
+            value_surface = self._render_text(
+                self._format_slider_value(slider_id, values[slider_id]),
+                HUD_BAR_FILL,
+                self._scaled(13),
+                "mono",
+                cache=False,
+            )
             surface.blit(label_surface, (track.left, row_top))
             surface.blit(value_surface, (track.right - value_surface.get_width(), row_top))
 
@@ -328,7 +348,13 @@ class HUDRenderer:
     def _draw_footer(self, surface: pygame.Surface, fps: float) -> None:
         text = f"{fps:>5.1f} FPS"
         footer_size = self._scaled(13)
-        footer = self._render_text(self._fit_text(text, footer_size, self.width - self._scaled(96), "mono"), HUD_MUTED, footer_size, "mono")
+        footer = self._render_text(
+            self._fit_text(text, footer_size, self.width - self._scaled(96), "mono"),
+            HUD_MUTED,
+            footer_size,
+            "mono",
+            cache=False,
+        )
         footer_y = self.height - self._scaled(34)
         surface.blit(footer, ((self.width - footer.get_width()) // 2, footer_y))
 
@@ -403,7 +429,7 @@ class HUDRenderer:
 
     def _draw_metric(self, surface: pygame.Surface, label: str, value: float, x: int, y: int) -> None:
         label_surface = self._render_text(label, HUD_MUTED, self._scaled(13), "mono")
-        value_surface = self._render_text(f"{value:>4.2f}", HUD_TEXT, self._scaled(13), "mono")
+        value_surface = self._render_text(f"{value:>4.2f}", HUD_TEXT, self._scaled(13), "mono", cache=False)
         surface.blit(label_surface, (x, y))
         surface.blit(value_surface, (x + self._scaled(204), y))
 
@@ -539,11 +565,21 @@ class HUDRenderer:
         bbox = font.getbbox("Ag")
         return max(1, bbox[3] - bbox[1] + 2)
 
-    def _render_text(self, text: str, color: Tuple[int, int, int], size: int, style: str) -> pygame.Surface:
+    def _render_text(
+        self,
+        text: str,
+        color: Tuple[int, int, int],
+        size: int,
+        style: str,
+        *,
+        cache: bool = True,
+    ) -> pygame.Surface:
         key = (text, color, size, style)
-        cached = self._surface_cache.get(key)
-        if cached is not None:
-            return cached
+        if cache:
+            cached = self._surface_cache.get(key)
+            if cached is not None:
+                self._surface_cache.move_to_end(key)
+                return cached
 
         font = self._font(size, style)
         bbox = font.getbbox(text or " ")
@@ -554,7 +590,10 @@ class HUDRenderer:
         draw = ImageDraw.Draw(image)
         draw.text((1 - bbox[0], 1 - bbox[1]), text, font=font, fill=(*color, 255))
         rendered = pygame.image.fromstring(image.tobytes(), image.size, image.mode).convert_alpha()
-        self._surface_cache[key] = rendered
+        if cache:
+            self._surface_cache[key] = rendered
+            if len(self._surface_cache) > SURFACE_CACHE_LIMIT:
+                self._surface_cache.popitem(last=False)
         return rendered
 
     def _text_width(self, text: str, size: int, style: str) -> int:

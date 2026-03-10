@@ -33,7 +33,7 @@ from config import (
 from hands import GestureInterpreter
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Hand-controlled strange attractor visualizer")
     parser.add_argument("--no-camera", action="store_true", dest="no_camera", help="Disable webcam hand tracking")
     parser.add_argument("--demo", action="store_true", help="Force demo mode (disables camera)")
@@ -41,16 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--headless", action="store_true", help="Use SDL dummy video driver")
     parser.add_argument("--frames", type=int, default=0, help="Exit after N rendered frames (0 keeps running)")
     parser.add_argument("--screenshot-path", type=str, default="", help="Save the final rendered frame to a specific path")
-    return parser.parse_args()
-
-
-args = parse_args()
-if args.headless:
-    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-
-import pygame
-
-from renderer import SceneRenderer, SceneState
+    return parser.parse_args(argv)
 
 
 @dataclass
@@ -199,7 +190,7 @@ def _find_builtin_camera_index() -> int:
     return 0
 
 
-def maybe_create_camera_session() -> CameraTrackerSession | None:
+def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSession | None:
     if args.demo or args.no_camera:
         return None
 
@@ -227,13 +218,21 @@ def maybe_create_camera_session() -> CameraTrackerSession | None:
     return CameraTrackerSession(capture, HandTracker(), cv2)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    if args.headless:
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
+    import pygame
+
+    from renderer import SceneRenderer, SceneState
+
     renderer = SceneRenderer()
     manager = AttractorManager()
     controls = ControlState()
     gestures = GestureInterpreter()
 
-    camera_session = maybe_create_camera_session()
+    camera_session = maybe_create_camera_session(args)
     camera_frame = None
     frame_count = 0
     particle_input_active = False
@@ -279,7 +278,7 @@ def main() -> None:
                     elif event.key == pygame.K_p:
                         particle_input_active = True
                         particle_input_text = ""
-                    elif pygame.K_1 <= event.key <= pygame.K_7:
+                    elif pygame.K_1 <= event.key < pygame.K_1 + manager.total:
                         manager.switch_to(event.key - pygame.K_1)
                     elif event.key == pygame.K_UP:
                         controls.set_target("speed", min(SPEED_RANGE[1], controls._targets["speed"] + 0.1))

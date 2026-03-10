@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from config import SPEED_RANGE
+from config import HELP_LINES, SPEED_RANGE
 from hands.gestures import GestureInterpreter
 
 
@@ -30,6 +30,23 @@ def make_hand(
 
 
 class GestureTests(unittest.TestCase):
+    def test_help_lines_match_gesture_mapping(self) -> None:
+        left_start = HELP_LINES.index("LEFT HAND") + 1
+        left_end = HELP_LINES.index("", left_start)
+        right_start = HELP_LINES.index("RIGHT HAND") + 1
+        right_end = HELP_LINES.index("", right_start)
+
+        left_section = HELP_LINES[left_start:left_end]
+        right_section = HELP_LINES[right_start:right_end]
+
+        self.assertIn("Palm X -> Yaw", left_section)
+        self.assertIn("Palm Y -> Pitch", left_section)
+        self.assertIn("Pinch -> Speed", left_section)
+        self.assertIn("Pinky touch palm -> Previous attractor", left_section)
+        self.assertIn("Index Y -> Luminosity", right_section)
+        self.assertIn("Pinch -> Scale / zoom", right_section)
+        self.assertIn("Pinky touch palm -> Next attractor", right_section)
+
     def test_left_pinch_controls_speed_and_right_maps_visuals(self) -> None:
         interpreter = GestureInterpreter()
         left = make_hand(
