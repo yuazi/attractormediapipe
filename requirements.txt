@@ -3,3 +3,7 @@ opencv-python
 pygame
 numpy
 Pillow
+numba
+moderngl
+datashader
+pandas

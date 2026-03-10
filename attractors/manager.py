@@ -2,31 +2,36 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, Sequence
 
 import numpy as np
 
-from config import CAMERA_DISTANCE, CAMERA_FOV, TRAIL_BUFFER_CAPACITY
+from config import DEFAULT_SCALE, TRAIL_BUFFER_CAPACITY
 
 from .aizawa import AizawaAttractor
 from .chen import ChenAttractor
 from .dadras import DadrasAttractor
 from .halvorsen import HalvorsenAttractor
+from .langford import LangfordAttractor
 from .lorenz import LorenzAttractor
 from .rossler import RosslerAttractor
 from .sprott_b import SprottBAttractor
 from .thomas import ThomasAttractor
 
 
-ATTRACTOR_TYPES = (
+ACTIVE_ATTRACTOR_TYPES = (
     LorenzAttractor,
-    RosslerAttractor,
-    HalvorsenAttractor,
-    ThomasAttractor,
-    DadrasAttractor,
     AizawaAttractor,
     SprottBAttractor,
+    ThomasAttractor,
+    DadrasAttractor,
     ChenAttractor,
+    LangfordAttractor,
+)
+
+INACTIVE_ATTRACTOR_TYPES = (
+    RosslerAttractor,
+    HalvorsenAttractor,
 )
 
 PLACARD_MEDIUM = "Generative computation, real-time\nrendering on custom software"
@@ -37,7 +42,7 @@ class PlacardData:
     title: str
     year: str
     medium: str
-    params: Tuple[Tuple[str, str], ...]
+    params: tuple[tuple[str, str], ...]
 
 
 PLACARD_OVERRIDES = {
@@ -45,31 +50,31 @@ PLACARD_OVERRIDES = {
         title="Lorenz Attractor",
         year="E. N. Lorenz, 1963",
         medium=PLACARD_MEDIUM,
-        params=(("σ (sigma)", "10.000"), ("ρ (rho)", "28.000"), ("β (beta)", "2.667")),
+        params=(("sigma", "10.000"), ("rho", "28.000"), ("beta", "2.667")),
     ),
-    "Rossler": PlacardData(
-        title="Rössler Attractor",
-        year="O. E. Rössler, 1976",
+    "Aizawa": PlacardData(
+        title="Aizawa Attractor",
+        year="K. Aizawa, 1982",
         medium=PLACARD_MEDIUM,
-        params=(("a", "0.200"), ("b", "0.200"), ("c", "5.700")),
-    ),
-    "Halvorsen": PlacardData(
-        title="Halvorsen Attractor",
-        year="Per Frode Halvorsen",
-        medium=PLACARD_MEDIUM,
-        params=(("a", "1.890"), ("symmetry", "cyclic"), ("dim", "3")),
-    ),
-    "Thomas": PlacardData(
-        title="Thomas’ Cyclically Symmetric Attractor",
-        year="René Thomas, 1999",
-        medium=PLACARD_MEDIUM,
-        params=(("b", "0.208"), ("symmetry", "cyclic 3-fold"), ("dim", "3")),
+        params=(("a", "0.950"), ("b", "0.700"), ("c", "0.600")),
     ),
     "Sprott B": PlacardData(
         title="Sprott B Attractor",
         year="J. C. Sprott, 1994",
         medium=PLACARD_MEDIUM,
-        params=(("type", "conservative"), ("class", "B"), ("dim", "3")),
+        params=(("a", "1.000"), ("b", "1.000"), ("class", "B")),
+    ),
+    "Thomas": PlacardData(
+        title="Thomas' Attractor",
+        year="Rene Thomas, 1999",
+        medium=PLACARD_MEDIUM,
+        params=(("b", "0.208"), ("symmetry", "cyclic"), ("dim", "3")),
+    ),
+    "Dadras": PlacardData(
+        title="Dadras Attractor",
+        year="S. Dadras et al., 2006",
+        medium=PLACARD_MEDIUM,
+        params=(("p", "3.000"), ("q", "2.700"), ("r", "1.700")),
     ),
     "Chen": PlacardData(
         title="Chen Attractor",
@@ -77,17 +82,23 @@ PLACARD_OVERRIDES = {
         medium=PLACARD_MEDIUM,
         params=(("a", "35.000"), ("b", "3.000"), ("c", "28.000")),
     ),
+    "Langford": PlacardData(
+        title="Langford Attractor",
+        year="W. F. Langford",
+        medium=PLACARD_MEDIUM,
+        params=(("alpha", "0.950"), ("beta", "0.700"), ("omega", "3.500")),
+    ),
 }
 
 
 def normalize_points(points: np.ndarray) -> np.ndarray:
     if len(points) == 0:
-        return points
-    centered = points - points.mean(axis=0, keepdims=True)
-    max_extent = np.max(np.abs(centered))
-    if max_extent < 1e-8:
+        return np.empty((0, 3), dtype=np.float32)
+    centered = points.astype(np.float32, copy=False) - points.mean(axis=0, keepdims=True).astype(np.float32, copy=False)
+    max_extent = float(np.max(np.abs(centered)))
+    if max_extent < 1e-6:
         return centered
-    return centered / max_extent
+    return centered / np.float32(max_extent)
 
 
 def rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
@@ -101,7 +112,7 @@ def rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
             [0.0, 1.0, 0.0],
             [-math.sin(yaw_r), 0.0, math.cos(yaw_r)],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
     rot_x = np.array(
         [
@@ -109,7 +120,7 @@ def rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
             [0.0, math.cos(pitch_r), -math.sin(pitch_r)],
             [0.0, math.sin(pitch_r), math.cos(pitch_r)],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
     rot_z = np.array(
         [
@@ -117,7 +128,7 @@ def rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
             [math.sin(roll_r), math.cos(roll_r), 0.0],
             [0.0, 0.0, 1.0],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
     return rot_z @ rot_x @ rot_y
 
@@ -126,12 +137,13 @@ def perspective_project(
     points: np.ndarray,
     rotation: np.ndarray,
     zoom: float,
-    screen_size: Tuple[int, int],
-    fov: float = CAMERA_FOV,
-    camera_distance: float = CAMERA_DISTANCE,
-) -> Tuple[np.ndarray, np.ndarray]:
+    screen_size: tuple[int, int],
+    *,
+    fov: float = 520.0,
+    camera_distance: float = 4.6,
+) -> tuple[np.ndarray, np.ndarray]:
     if len(points) == 0:
-        return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
+        return np.empty((0, 2), dtype=np.float32), np.empty((0,), dtype=np.float32)
 
     width, height = screen_size
     rotated = points @ rotation.T
@@ -140,28 +152,33 @@ def perspective_project(
     sx = rotated[:, 0] * zoom * fov / z + width * 0.5
     sy = rotated[:, 1] * zoom * fov / z + height * 0.5
     depths = np.clip(1.0 - (z - 0.2) / (camera_distance + 2.0), 0.15, 1.0)
-    return np.stack((sx, sy), axis=1), depths
+    return np.stack((sx, sy), axis=1).astype(np.float32, copy=False), depths.astype(np.float32, copy=False)
 
 
 class AttractorManager:
     def __init__(self, capacity: int = TRAIL_BUFFER_CAPACITY) -> None:
         self.capacity = capacity
-        self._trail = np.zeros((capacity, 3), dtype=np.float64)
-        self._count = 0
-        self._head = 0
+        self.attractors = [attractor_type() for attractor_type in ACTIVE_ATTRACTOR_TYPES]
+        self._trails = [np.zeros((capacity, 3), dtype=np.float32) for _ in self.attractors]
+        self._counts = np.zeros(len(self.attractors), dtype=np.int32)
+        self._heads = np.zeros(len(self.attractors), dtype=np.int32)
         self.index = 0
-        self.current = ATTRACTOR_TYPES[self.index]()
+        self.zoom = DEFAULT_SCALE
+
+    @property
+    def current(self):
+        return self.attractors[self.index]
 
     @property
     def count(self) -> int:
-        return self._count
+        return int(self._counts[self.index])
 
     @property
     def name(self) -> str:
         return self.current.name
 
     @property
-    def color(self) -> Tuple[int, int, int]:
+    def color(self) -> tuple[int, int, int]:
         return self.current.color
 
     @property
@@ -170,25 +187,19 @@ class AttractorManager:
 
     @property
     def total(self) -> int:
-        return len(ATTRACTOR_TYPES)
+        return len(self.attractors)
 
     @property
-    def names(self) -> Tuple[str, ...]:
-        return tuple(attractor_type.name for attractor_type in ATTRACTOR_TYPES)
+    def names(self) -> tuple[str, ...]:
+        return tuple(attractor.name for attractor in self.attractors)
 
     @property
-    def state_vector(self) -> Tuple[float, float, float]:
+    def state_vector(self) -> tuple[float, float, float]:
         return tuple(float(value) for value in self.current.state)
 
     @property
-    def parameter_rows(self) -> Tuple[Tuple[str, float], ...]:
-        rows: list[Tuple[str, float]] = []
-        for key, value in vars(self.current).items():
-            if key == "state" or key.startswith("_"):
-                continue
-            if isinstance(value, (int, float, np.integer, np.floating)):
-                rows.append((key.upper(), float(value)))
-        return tuple(rows)
+    def parameter_rows(self) -> tuple[tuple[str, float], ...]:
+        return tuple((key.upper(), float(value)) for key, value in self.current.parameter_dict().items())
 
     @property
     def placard(self) -> PlacardData:
@@ -203,14 +214,34 @@ class AttractorManager:
             params=fallback_rows,
         )
 
+    def active_index_for_name(self, name: str) -> int:
+        normalized = name.strip().lower()
+        for index, attractor in enumerate(self.attractors):
+            if attractor.name.lower() == normalized:
+                return index
+        raise KeyError(name)
+
+    def get_attractor(self, index: int | None = None):
+        target_index = self.index if index is None else max(0, min(index, self.total - 1))
+        return self.attractors[target_index]
+
+    def clone_current(self):
+        return self.current.clone()
+
     def reset(self) -> None:
         self.current.reset()
-        self.clear_trail()
+        self.clear_trail(self.index)
 
-    def clear_trail(self) -> None:
-        self._count = 0
-        self._head = 0
-        self._trail.fill(0.0)
+    def reset_all(self) -> None:
+        for index, attractor in enumerate(self.attractors):
+            attractor.reset()
+            self.clear_trail(index)
+
+    def clear_trail(self, index: int | None = None) -> None:
+        target_index = self.index if index is None else max(0, min(index, self.total - 1))
+        self._counts[target_index] = 0
+        self._heads[target_index] = 0
+        self._trails[target_index].fill(0.0)
 
     def switch_to(self, index: int) -> None:
         new_index = max(0, min(index, self.total - 1))
@@ -218,38 +249,58 @@ class AttractorManager:
             self.reset()
             return
         self.index = new_index
-        self.current = ATTRACTOR_TYPES[self.index]()
-        self.clear_trail()
+        self.current.reset()
+        self.clear_trail(new_index)
 
     def switch_relative(self, delta: int) -> None:
         if delta == 0:
             return
         self.index = (self.index + delta) % self.total
-        self.current = ATTRACTOR_TYPES[self.index]()
-        self.clear_trail()
+        self.current.reset()
+        self.clear_trail(self.index)
 
     def step_many(self, dt: float, steps: int) -> np.ndarray:
-        samples = np.zeros((steps, 3), dtype=np.float64)
-        for idx in range(steps):
-            point = self.current.step(dt)
-            self._append_point(point)
-            samples[idx] = point
+        samples = self.current.fill_samples(dt, steps)
+        self._append_points(self.index, samples)
         return samples
 
-    def _append_point(self, point: np.ndarray) -> None:
-        self._trail[self._head] = point
-        self._head = (self._head + 1) % self.capacity
-        self._count = min(self._count + 1, self.capacity)
+    def _append_points(self, index: int, points: np.ndarray) -> None:
+        if len(points) == 0:
+            return
+        head = int(self._heads[index])
+        count = len(points)
+        first_chunk = min(self.capacity - head, count)
+        trail = self._trails[index]
+        trail[head:head + first_chunk] = points[:first_chunk]
+        remaining = count - first_chunk
+        if remaining > 0:
+            trail[:remaining] = points[first_chunk:]
+        self._heads[index] = (head + count) % self.capacity
+        self._counts[index] = min(self.capacity, int(self._counts[index]) + count)
 
-    def get_recent_trail(self, limit: int | None = None) -> np.ndarray:
-        if self._count == 0:
-            return np.empty((0, 3), dtype=np.float64)
-        limit = self._count if limit is None else min(limit, self._count)
-        start = (self._head - limit) % self.capacity
-        if start < self._head and limit == self._head - start:
-            return self._trail[start:self._head].copy()
-        indices = (np.arange(limit) + start) % self.capacity
-        return self._trail[indices].copy()
+    def get_recent_trail(self, limit: int | None = None, *, index: int | None = None) -> np.ndarray:
+        target_index = self.index if index is None else max(0, min(index, self.total - 1))
+        count = int(self._counts[target_index])
+        if count == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
+        take = count if limit is None else min(limit, count)
+        head = int(self._heads[target_index])
+        start = (head - take) % self.capacity
+        trail = self._trails[target_index]
+        if start < head and take == head - start:
+            return trail[start:head].copy()
+        indices = (np.arange(take, dtype=np.int32) + start) % self.capacity
+        return trail[indices].copy()
+
+    def get_render_data(self, limit: int) -> tuple[np.ndarray, np.ndarray]:
+        trail = self.get_recent_trail(limit)
+        normalized = normalize_points(trail)
+        if len(normalized) == 0:
+            return normalized, np.empty((0,), dtype=np.float32)
+        normalized *= np.float32(self.scale_hint)
+        ages = np.linspace(0.02, 1.0, num=len(normalized), dtype=np.float32)
+        return normalized.astype(np.float32, copy=False), ages
 
     def get_projected_trail(
         self,
@@ -258,11 +309,27 @@ class AttractorManager:
         pitch: float,
         roll: float,
         zoom: float,
-        screen_size: Tuple[int, int],
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        screen_size: tuple[int, int],
+    ) -> tuple[np.ndarray, np.ndarray]:
         trail = self.get_recent_trail(limit)
         if len(trail) == 0:
-            return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
-        normalized = normalize_points(trail)
+            return np.empty((0, 2), dtype=np.float32), np.empty((0,), dtype=np.float32)
+        normalized = normalize_points(trail) * np.float32(self.scale_hint)
         rotation = rotation_matrix(yaw, pitch, roll)
-        return perspective_project(normalized, rotation, zoom * self.scale_hint, screen_size)
+        return perspective_project(normalized, rotation, zoom, screen_size)
+
+
+def create_active_attractor(name: str):
+    normalized = name.strip().lower()
+    for attractor_type in ACTIVE_ATTRACTOR_TYPES:
+        if attractor_type.name.lower() == normalized:
+            return attractor_type()
+    raise KeyError(name)
+
+
+def active_attractor_names() -> Sequence[str]:
+    return tuple(attractor_type.name for attractor_type in ACTIVE_ATTRACTOR_TYPES)
+
+
+def inactive_attractor_names() -> Iterable[str]:
+    return tuple(attractor_type.name for attractor_type in INACTIVE_ATTRACTOR_TYPES)

@@ -35,9 +35,11 @@ class GestureTests(unittest.TestCase):
         left_end = HELP_LINES.index("", left_start)
         right_start = HELP_LINES.index("RIGHT HAND") + 1
         right_end = HELP_LINES.index("", right_start)
+        keys_start = HELP_LINES.index("KEYS") + 1
 
         left_section = HELP_LINES[left_start:left_end]
         right_section = HELP_LINES[right_start:right_end]
+        keys_section = HELP_LINES[keys_start:]
 
         self.assertIn("Palm X -> Yaw", left_section)
         self.assertIn("Palm Y -> Pitch", left_section)
@@ -46,6 +48,7 @@ class GestureTests(unittest.TestCase):
         self.assertIn("Index Y -> Luminosity", right_section)
         self.assertIn("Pinch -> Scale / zoom", right_section)
         self.assertIn("Pinky touch palm -> Next attractor", right_section)
+        self.assertTrue(any("[1-7] switch" in line for line in keys_section))
 
     def test_left_pinch_controls_speed_and_right_maps_visuals(self) -> None:
         interpreter = GestureInterpreter()

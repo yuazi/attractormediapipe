@@ -1,19 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import math
-import os
 import threading
 import time
 from dataclasses import dataclass, field
 
-from attractors import AttractorManager
+from attractors import AttractorManager, active_attractor_names
 from config import (
     CAMERA_FRAME_HEIGHT,
     CAMERA_FRAME_WIDTH,
     DEFAULT_DT,
     DEFAULT_LUMINOSITY,
-    DEFAULT_PARTICLE_COUNT,
     DEFAULT_PITCH,
     DEFAULT_ROLL,
     DEFAULT_SCALE,
@@ -23,24 +20,31 @@ from config import (
     HAND_TRACKING_FPS,
     MAX_TRAIL,
     MIN_TRAIL,
-    PARTICLE_COUNT_RANGE,
+    SCALE_RANGE,
+    SNAPSHOT_BURN_IN,
+    SNAPSHOT_SAMPLE_STRIDE,
+    SNAPSHOT_SAMPLES,
     SMOOTH_ALPHA,
     SPEED_RANGE,
     STEPS_PER_FRAME,
-    WIN_H,
-    WIN_W,
+    TRAIL_STEP_DELTA,
 )
 from hands import GestureInterpreter
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Hand-controlled strange attractor visualizer")
+    parser = argparse.ArgumentParser(description="ModernGL strange attractor trail viewer")
     parser.add_argument("--no-camera", action="store_true", dest="no_camera", help="Disable webcam hand tracking")
     parser.add_argument("--demo", action="store_true", help="Force demo mode (disables camera)")
     parser.add_argument("--camera-index", type=int, default=-1, dest="camera_index", help="Camera device index to use (-1 = auto-detect built-in camera)")
-    parser.add_argument("--headless", action="store_true", help="Use SDL dummy video driver")
+    parser.add_argument("--headless", action="store_true", help="Run without opening a window; requires snapshot export")
     parser.add_argument("--frames", type=int, default=0, help="Exit after N rendered frames (0 keeps running)")
-    parser.add_argument("--screenshot-path", type=str, default="", help="Save the final rendered frame to a specific path")
+    parser.add_argument("--screenshot-path", type=str, default="", help="Output path for snapshot-only or headless export")
+    parser.add_argument("--snapshot-only", action="store_true", help="Export a Datashader snapshot and exit")
+    parser.add_argument("--attractor", type=str, default="", help="Active attractor name for startup or snapshot export")
+    parser.add_argument("--snapshot-samples", type=int, default=0, help="Override the default Datashader sample count")
+    parser.add_argument("--snapshot-burn-in", type=int, default=0, help="Override the default Datashader burn-in steps")
+    parser.add_argument("--snapshot-stride", type=int, default=0, help="Override the default Datashader sample stride")
     return parser.parse_args(argv)
 
 
@@ -49,34 +53,35 @@ class ControlState:
     yaw: float = DEFAULT_YAW
     pitch: float = DEFAULT_PITCH
     roll: float = DEFAULT_ROLL
-    scale: float = DEFAULT_SCALE
+    zoom: float = DEFAULT_SCALE
     speed: float = DEFAULT_SPEED
     luminosity: float = DEFAULT_LUMINOSITY
     trail_len: int = DEFAULT_TRAIL
-    particle_count: int = DEFAULT_PARTICLE_COUNT
-    bloom_enabled: bool = True
-    show_overlay: bool = False
+    paused: bool = False
+    show_overlay: bool = True
     show_camera: bool = False
     focus_mode: bool = False
-    _targets: dict = field(default_factory=lambda: {
-        "yaw": DEFAULT_YAW,
-        "pitch": DEFAULT_PITCH,
-        "roll": DEFAULT_ROLL,
-        "scale": DEFAULT_SCALE,
-        "speed": DEFAULT_SPEED,
-        "luminosity": DEFAULT_LUMINOSITY,
-        "trail_len": float(DEFAULT_TRAIL),
-    })
+    _targets: dict = field(
+        default_factory=lambda: {
+            "yaw": DEFAULT_YAW,
+            "pitch": DEFAULT_PITCH,
+            "zoom": DEFAULT_SCALE,
+            "speed": DEFAULT_SPEED,
+            "luminosity": DEFAULT_LUMINOSITY,
+        }
+    )
 
     def set_target(self, name: str, value: float) -> None:
         self._targets[name] = value
 
     def smooth(self, alpha: float = SMOOTH_ALPHA) -> None:
-        for key in ("yaw", "pitch", "roll", "scale", "speed", "luminosity"):
+        for key in ("yaw", "pitch", "zoom", "speed", "luminosity"):
             current = getattr(self, key)
             target = self._targets[key]
             setattr(self, key, current + alpha * (target - current))
-        self.trail_len = int(round(self._targets["trail_len"]))
+        self.zoom = max(SCALE_RANGE[0], min(SCALE_RANGE[1], self.zoom))
+        self.speed = max(SPEED_RANGE[0], min(SPEED_RANGE[1], self.speed))
+        self.luminosity = max(0.05, min(1.0, self.luminosity))
 
 
 @dataclass(frozen=True)
@@ -126,58 +131,19 @@ class CameraTrackerSession:
         self.tracker.close()
 
 
-def _apply_particle_count(controls: ControlState, raw_value: str) -> str:
-    if not raw_value:
-        return str(controls.trail_len)
-    particle_count = max(MIN_TRAIL, min(MAX_TRAIL, int(raw_value)))
-    controls.trail_len = particle_count
-    controls.set_target("trail_len", float(particle_count))
-    return str(particle_count)
-
-
-def _apply_particle_stream_count(controls: ControlState, raw_value: float | int) -> None:
-    minimum, maximum = PARTICLE_COUNT_RANGE
-    controls.particle_count = max(minimum, min(maximum, int(round(raw_value))))
-
-
-def _apply_slider_control(controls: ControlState, slider_id: str, raw_value: float) -> None:
-    if slider_id == "speed":
-        controls.speed = raw_value
-        controls.set_target("speed", raw_value)
-    elif slider_id == "trail_len":
-        particle_count = int(round(raw_value))
-        controls.trail_len = particle_count
-        controls.set_target("trail_len", float(particle_count))
-    elif slider_id == "particle_count":
-        _apply_particle_stream_count(controls, raw_value)
-    elif slider_id == "luminosity":
-        controls.luminosity = raw_value
-        controls.set_target("luminosity", raw_value)
-    elif slider_id == "scale":
-        controls.scale = raw_value
-        controls.set_target("scale", raw_value)
-
-
-def demo_rotation_targets(frame_count: int) -> tuple[float, float, float]:
-    t = frame_count / 60.0
-    yaw = math.sin(t * 0.85) * 160.0
-    pitch = math.sin(t * 0.41) * 36.0
-    roll = math.cos(t * 0.33) * 24.0
-    return yaw, pitch, roll
-
-
 def _find_builtin_camera_index() -> int:
-    """On macOS, try to find the built-in FaceTime camera index via system_profiler.
-    Falls back to 0 on failure or non-macOS systems."""
+    import json
     import platform
     import subprocess
-    import json
+
     if platform.system() != "Darwin":
         return 0
     try:
         result = subprocess.run(
             ["system_profiler", "SPCameraDataType", "-json"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         cameras = json.loads(result.stdout).get("SPCameraDataType", [])
         for idx, cam in enumerate(cameras):
@@ -218,88 +184,159 @@ def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSessio
     return CameraTrackerSession(capture, HandTracker(), cv2)
 
 
+def _adjust_speed(controls: ControlState, delta: float) -> None:
+    controls.set_target("speed", max(SPEED_RANGE[0], min(SPEED_RANGE[1], controls._targets["speed"] + delta)))
+
+
+def _adjust_trail(controls: ControlState, delta: int) -> None:
+    controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, controls.trail_len + delta))
+
+
+def _adjust_zoom(controls: ControlState, factor: float) -> None:
+    controls.set_target("zoom", max(SCALE_RANGE[0], min(SCALE_RANGE[1], controls._targets["zoom"] * factor)))
+
+
+def _apply_slider_control(controls: ControlState, slider_id: str, value: float) -> None:
+    if slider_id == "speed":
+        controls.set_target("speed", value)
+    elif slider_id == "trail_len":
+        controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, int(round(value))))
+    elif slider_id == "luminosity":
+        controls.set_target("luminosity", value)
+    elif slider_id == "scale":
+        controls.set_target("zoom", value)
+
+
+def run_snapshot_export(args: argparse.Namespace) -> str:
+    from renderer import SnapshotRequest, export_attractor_snapshot
+
+    available = active_attractor_names()
+    requested_name = args.attractor or available[0]
+    lookup = {name.lower(): name for name in available}
+    attractor_name = lookup.get(requested_name.lower())
+    if attractor_name is None:
+        raise SystemExit(f"Unknown active attractor '{requested_name}'. Available: {', '.join(available)}")
+
+    request = SnapshotRequest(
+        attractor_name=attractor_name,
+        yaw=DEFAULT_YAW,
+        pitch=DEFAULT_PITCH,
+        roll=DEFAULT_ROLL,
+        zoom=DEFAULT_SCALE,
+        time_value=0.0,
+        luminosity=DEFAULT_LUMINOSITY,
+        output_path=args.screenshot_path,
+        sample_count=args.snapshot_samples or SNAPSHOT_SAMPLES,
+        burn_in=args.snapshot_burn_in or SNAPSHOT_BURN_IN,
+        sample_stride=args.snapshot_stride or SNAPSHOT_SAMPLE_STRIDE,
+    )
+    output = export_attractor_snapshot(request)
+    print(f"Saved snapshot: {output}")
+    return output
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.snapshot_only or (args.headless and args.screenshot_path):
+        run_snapshot_export(args)
+        return
     if args.headless:
-        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        raise SystemExit("--headless now requires --screenshot-path or --snapshot-only")
 
     import pygame
 
-    from renderer import SceneRenderer, SceneState
+    from renderer import SceneRenderer, SceneState, SnapshotController, SnapshotRequest
 
     renderer = SceneRenderer()
     manager = AttractorManager()
     controls = ControlState()
     gestures = GestureInterpreter()
+    snapshotter = SnapshotController()
+
+    if args.attractor:
+        try:
+            manager.switch_to(manager.active_index_for_name(args.attractor))
+        except KeyError as exc:
+            renderer.quit()
+            raise SystemExit(f"Unknown active attractor '{args.attractor}'") from exc
 
     camera_session = maybe_create_camera_session(args)
     camera_frame = None
-    frame_count = 0
-    particle_input_active = False
-    particle_input_text = str(DEFAULT_TRAIL)
-    active_slider: str | None = None
     running = True
+    frame_count = 0
+    animation_time = 0.0
+    last_frame_time = time.perf_counter()
+    active_slider: str | None = None
 
     try:
         while running:
-            fps = renderer.clock.get_fps()
+            now = time.perf_counter()
+            frame_delta = now - last_frame_time
+            last_frame_time = now
+            if not controls.paused:
+                animation_time += frame_delta
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if particle_input_active:
-                        if event.key == pygame.K_ESCAPE:
-                            particle_input_active = False
-                            particle_input_text = str(controls.trail_len)
-                        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-                            particle_input_text = _apply_particle_count(controls, particle_input_text)
-                            particle_input_active = False
-                        elif event.key == pygame.K_BACKSPACE:
-                            particle_input_text = particle_input_text[:-1]
-                        elif event.unicode.isdigit() and len(particle_input_text) < 5:
-                            particle_input_text += event.unicode
-                        continue
-
                     if event.key == pygame.K_ESCAPE:
                         running = False
+                    elif event.key == pygame.K_SPACE:
+                        controls.paused = not controls.paused
                     elif event.key == pygame.K_r:
-                        manager.reset()
+                        manager.reset_all()
                     elif event.key == pygame.K_s:
-                        screenshot = renderer.save_screenshot()
-                        print(f"Saved screenshot: {screenshot}")
-                    elif event.key == pygame.K_b:
-                        controls.bloom_enabled = not controls.bloom_enabled
+                        snapshotter.start(
+                            SnapshotRequest(
+                                attractor_name=manager.name,
+                                yaw=controls.yaw,
+                                pitch=controls.pitch,
+                                roll=controls.roll,
+                                zoom=controls.zoom,
+                                time_value=animation_time,
+                                luminosity=controls.luminosity,
+                                state=manager.state_vector,
+                            )
+                        )
                     elif event.key == pygame.K_h:
                         controls.show_overlay = not controls.show_overlay
                     elif event.key == pygame.K_c:
                         controls.show_camera = not controls.show_camera
                     elif event.key == pygame.K_m:
                         controls.focus_mode = not controls.focus_mode
-                    elif event.key == pygame.K_p:
-                        particle_input_active = True
-                        particle_input_text = ""
                     elif pygame.K_1 <= event.key < pygame.K_1 + manager.total:
                         manager.switch_to(event.key - pygame.K_1)
                     elif event.key == pygame.K_UP:
-                        controls.set_target("speed", min(SPEED_RANGE[1], controls._targets["speed"] + 0.1))
+                        _adjust_speed(controls, 0.1)
                     elif event.key == pygame.K_DOWN:
-                        controls.set_target("speed", max(SPEED_RANGE[0], controls._targets["speed"] - 0.1))
-                    elif event.key == pygame.K_RIGHT:
-                        particle_input_text = _apply_particle_count(controls, str(int(controls._targets["trail_len"]) + 200))
+                        _adjust_speed(controls, -0.1)
                     elif event.key == pygame.K_LEFT:
-                        particle_input_text = _apply_particle_count(controls, str(int(controls._targets["trail_len"]) - 200))
-                    elif event.key == pygame.K_PERIOD:
-                        _apply_particle_stream_count(controls, controls.particle_count + 1)
-                    elif event.key == pygame.K_COMMA:
-                        _apply_particle_stream_count(controls, controls.particle_count - 1)
-                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not controls.focus_mode:
-                    active_slider = renderer.hud.control_hit_test(event.pos)
+                        _adjust_trail(controls, -TRAIL_STEP_DELTA)
+                    elif event.key == pygame.K_RIGHT:
+                        _adjust_trail(controls, TRAIL_STEP_DELTA)
+                elif (
+                    event.type == pygame.MOUSEBUTTONDOWN
+                    and event.button == 1
+                    and controls.show_overlay
+                    and not controls.focus_mode
+                ):
+                    active_slider = renderer.control_hit_test(manager.names, event.pos)
                     if active_slider is not None:
-                        _apply_slider_control(controls, active_slider, renderer.hud.control_value_for_position(active_slider, event.pos[0]))
+                        slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
+                        _apply_slider_control(controls, active_slider, slider_value)
+                elif event.type == pygame.MOUSEWHEEL:
+                    _adjust_zoom(controls, 1.12 if event.y > 0 else 1.0 / 1.12)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 4:
+                        _adjust_zoom(controls, 1.12)
+                    elif event.button == 5:
+                        _adjust_zoom(controls, 1.0 / 1.12)
                 elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                     active_slider = None
-                elif event.type == pygame.MOUSEMOTION and active_slider is not None and not controls.focus_mode:
-                    _apply_slider_control(controls, active_slider, renderer.hud.control_value_for_position(active_slider, event.pos[0]))
+                elif event.type == pygame.MOUSEMOTION and active_slider is not None:
+                    slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
+                    _apply_slider_control(controls, active_slider, slider_value)
 
             hand_data = {"left": None, "right": None}
             camera_frame = None
@@ -309,76 +346,63 @@ def main(argv: list[str] | None = None) -> None:
                 hand_data = snapshot.hand_data
 
             gesture_frame = gestures.update(hand_data)
-
             if gesture_frame.left_detected:
                 if gesture_frame.yaw is not None:
                     controls.set_target("yaw", gesture_frame.yaw)
                 if gesture_frame.pitch is not None:
                     controls.set_target("pitch", gesture_frame.pitch)
-                controls.set_target("roll", DEFAULT_ROLL)
-            else:
-                demo_yaw, demo_pitch, demo_roll = demo_rotation_targets(frame_count)
-                controls.set_target("yaw", demo_yaw)
-                controls.set_target("pitch", demo_pitch)
-                controls.set_target("roll", demo_roll)
-
+                if gesture_frame.speed is not None:
+                    controls.set_target("speed", gesture_frame.speed)
             if gesture_frame.right_detected:
-                if active_slider != "luminosity" and gesture_frame.luminosity is not None:
+                if gesture_frame.luminosity is not None:
                     controls.set_target("luminosity", gesture_frame.luminosity)
-                if active_slider != "scale" and gesture_frame.scale is not None:
-                    controls.set_target("scale", gesture_frame.scale)
-
-            if active_slider != "speed" and gesture_frame.speed is not None:
-                controls.set_target("speed", gesture_frame.speed)
-
+                if gesture_frame.scale is not None:
+                    controls.set_target("zoom", gesture_frame.scale)
             if gesture_frame.scene_delta:
                 manager.switch_relative(gesture_frame.scene_delta)
 
             controls.smooth()
 
-            dt = DEFAULT_DT * controls.speed
-            manager.step_many(dt, STEPS_PER_FRAME)
-            points_2d, depths = manager.get_projected_trail(
-                controls.trail_len,
-                controls.yaw,
-                controls.pitch,
-                controls.roll,
-                controls.scale,
-                (WIN_W, WIN_H),
-            )
+            if not controls.paused:
+                manager.step_many(DEFAULT_DT * controls.speed, STEPS_PER_FRAME)
+            positions, ages = manager.get_render_data(controls.trail_len)
 
             renderer.draw(
                 SceneState(
-                    points_2d=points_2d,
-                    depths=depths,
+                    positions=positions,
+                    ages=ages,
                     attractor_name=manager.name,
                     attractor_color=manager.color,
+                    attractor_index=manager.index,
+                    attractor_total=manager.total,
+                    attractor_names=manager.names,
+                    attractor_state=manager.state_vector,
                     placard_title=manager.placard.title,
                     placard_year=manager.placard.year,
                     placard_medium=manager.placard.medium,
                     placard_params=manager.placard.params,
-                    luminosity=controls.luminosity,
+                    yaw=controls.yaw,
+                    pitch=controls.pitch,
+                    roll=controls.roll,
+                    zoom=controls.zoom,
                     speed=controls.speed,
-                    scale=controls.scale,
+                    luminosity=controls.luminosity,
                     trail_len=controls.trail_len,
-                    particle_count=controls.particle_count,
-                    attractor_names=manager.names,
-                    attractor_index=manager.index,
-                    attractor_state=manager.state_vector,
-                    point_count=len(points_2d),
-                    fps=fps,
-                    left_detected=gesture_frame.left_detected,
-                    right_detected=gesture_frame.right_detected,
-                    bloom_enabled=controls.bloom_enabled,
+                    point_count=len(positions),
+                    fps=renderer.clock.get_fps(),
+                    paused=controls.paused,
+                    exporting=snapshotter.is_running,
+                    export_message=snapshotter.message,
                     show_overlay=controls.show_overlay,
                     show_camera=controls.show_camera,
                     focus_mode=controls.focus_mode,
                     active_slider=active_slider,
-                    particle_input_active=particle_input_active,
-                    particle_input_text=particle_input_text,
+                    left_detected=gesture_frame.left_detected,
+                    right_detected=gesture_frame.right_detected,
                     pip_frame=camera_frame,
                     left_landmarks=hand_data["left"],
                     right_landmarks=hand_data["right"],
+                    time_value=animation_time,
                 )
             )
 
@@ -388,8 +412,6 @@ def main(argv: list[str] | None = None) -> None:
             if args.frames and frame_count >= args.frames:
                 running = False
     finally:
-        if args.screenshot_path:
-            renderer.save_screenshot(args.screenshot_path)
         if camera_session is not None:
             camera_session.close()
         renderer.quit()
