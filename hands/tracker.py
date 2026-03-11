@@ -47,8 +47,10 @@ HandMap = Dict[str, Optional[List[Landmark]]]
 
 def _normalize_handedness_label(label: str) -> Optional[str]:
     normalized = label.strip().lower()
-    if normalized in {"left", "right"}:
-        return normalized
+    if normalized == "left":
+        return "right"
+    if normalized == "right":
+        return "left"
     return None
 
 
@@ -160,9 +162,9 @@ class HandTracker:
 
         detections: list[tuple[Optional[str], List[Landmark]]] = []
         for landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-            # MediaPipe handedness assumes a mirrored/selfie input.
-            # We track on the same mirrored frame we display, so the labels
-            # should pass through unchanged.
+            # The camera feed is mirrored before tracking. MediaPipe's handedness
+            # labels follow that mirrored image space here, so normalize them
+            # back to the user's physical left/right hands for gesture mapping.
             label = _normalize_handedness_label(handedness[0].category_name)
             if label is None:
                 label = None

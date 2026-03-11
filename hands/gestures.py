@@ -7,7 +7,8 @@ from typing import Dict, List, Optional, Tuple
 
 from config import (
     LUMINOSITY_RANGE,
-    INDEX_Y_RANGE,
+    MAX_TRAIL,
+    MIN_TRAIL,
     PINCH_RANGE,
     PITCH_RANGE,
     SCALE_RANGE,
@@ -57,6 +58,12 @@ def pinch_distance(landmarks: List[Landmark]) -> float:
     return math.hypot(index_tip[0] - thumb_tip[0], index_tip[1] - thumb_tip[1])
 
 
+def ring_pinch_distance(landmarks: List[Landmark]) -> float:
+    thumb_tip = landmarks[4]
+    ring_tip = landmarks[16]
+    return math.hypot(ring_tip[0] - thumb_tip[0], ring_tip[1] - thumb_tip[1])
+
+
 def palm_center(landmarks: List[Landmark]) -> Tuple[float, float]:
     palm_indices = (0, 5, 9, 13, 17)
     x = sum(landmarks[idx][0] for idx in palm_indices) / len(palm_indices)
@@ -86,17 +93,18 @@ class GestureInterpreter:
         )
 
         if left:
-            wrist_x, wrist_y = wrist_position(left)
-            frame.yaw = remap(wrist_x, 0.0, 1.0, *YAW_RANGE)
-            frame.pitch = remap(wrist_y, 0.0, 1.0, *PITCH_RANGE)
             frame.speed = remap(pinch_distance(left), *PINCH_RANGE, *SPEED_RANGE)
+            frame.luminosity = remap(ring_pinch_distance(left), *PINCH_RANGE, *LUMINOSITY_RANGE)
             frame.scene_delta += self._update_scene_turn("left", left, timestamp, -1)
         else:
             self._scene_turn_armed["left"] = True
 
         if right:
-            frame.luminosity = remap(right[8][1], *INDEX_Y_RANGE, *LUMINOSITY_RANGE)
+            wrist_x, wrist_y = wrist_position(right)
+            frame.yaw = remap(wrist_x, 0.0, 1.0, *YAW_RANGE)
+            frame.pitch = remap(wrist_y, 0.0, 1.0, *PITCH_RANGE)
             frame.scale = remap(pinch_distance(right), *PINCH_RANGE, *SCALE_RANGE)
+            frame.trail_len = int(round(remap(ring_pinch_distance(right), *PINCH_RANGE, float(MIN_TRAIL), float(MAX_TRAIL))))
             frame.scene_delta += self._update_scene_turn("right", right, timestamp, 1)
         else:
             self._scene_turn_armed["right"] = True

@@ -373,18 +373,18 @@ def main(argv: list[str] | None = None) -> None:
                 hand_data = snapshot.hand_data
 
             gesture_frame = gestures.update(hand_data)
-            if gesture_frame.left_detected:
-                if gesture_frame.yaw is not None:
-                    controls.set_target("yaw", gesture_frame.yaw)
-                if gesture_frame.pitch is not None:
-                    controls.set_target("pitch", gesture_frame.pitch)
-                if gesture_frame.speed is not None:
-                    controls.set_target("speed", gesture_frame.speed)
-            if gesture_frame.right_detected:
-                if gesture_frame.luminosity is not None:
-                    controls.set_target("luminosity", gesture_frame.luminosity)
-                if gesture_frame.scale is not None:
-                    controls.set_target("zoom", gesture_frame.scale)
+            if gesture_frame.yaw is not None:
+                controls.set_target("yaw", gesture_frame.yaw)
+            if gesture_frame.pitch is not None:
+                controls.set_target("pitch", gesture_frame.pitch)
+            if gesture_frame.speed is not None:
+                controls.set_target("speed", gesture_frame.speed)
+            if gesture_frame.luminosity is not None:
+                controls.set_target("luminosity", gesture_frame.luminosity)
+            if gesture_frame.scale is not None:
+                controls.set_target("zoom", gesture_frame.scale)
+            if gesture_frame.trail_len is not None:
+                controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, int(round(gesture_frame.trail_len))))
             if gesture_frame.scene_delta:
                 switch_now = time.monotonic()
                 if gesture_frame.scene_delta < 0:

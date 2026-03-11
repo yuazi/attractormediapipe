@@ -48,12 +48,13 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 
 ### Webcam gestures
 
-- Left hand palm X: yaw
-- Left hand palm Y: pitch
-- Left hand pinch: simulation speed
+- Left hand thumb + index pinch: simulation speed
+- Left hand thumb + ring pinch: luminosity
 - Left hand pinky touches palm: previous attractor, with `Previous` shown near the pinky-touch area in the PiP
-- Right hand index fingertip Y: luminosity
-- Right hand pinch: zoom
+- Right hand palm X: yaw
+- Right hand palm Y: pitch
+- Right hand thumb + index pinch: zoom
+- Right hand thumb + ring pinch: trail length
 - Right hand pinky touches palm: next attractor, with `Next` shown near the pinky-touch area in the PiP
 
 ### Keyboard and mouse
@@ -75,7 +76,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 ## UI notes
 
 - The live overlay follows the composition shown in [assets/readme_lorenz_ui.png](assets/readme_lorenz_ui.png): coordinate readout at the top-left, helper panel on the left, placard at the bottom-left, parameter panel upper-right, and `figure.` list on the right.
-- The camera PiP includes the hand skeleton overlay. Pinch gestures are labeled `Speed` and `Scale`, while attractor switches briefly show `Previous` or `Next` at the pinky-touch location.
+- The camera PiP includes the hand skeleton overlay. The left hand uses thumb-index for `Speed` and thumb-ring for `Luminosity`; the right hand uses thumb-index for `Scale` and thumb-ring for trail length, while attractor switches briefly show `Previous` or `Next` at the pinky-touch location.
 
 ## Snapshot details
 

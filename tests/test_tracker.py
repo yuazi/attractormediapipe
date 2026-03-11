@@ -16,9 +16,9 @@ def make_hand(center_x: float) -> list[tuple[float, float, float]]:
 
 
 class TrackerTests(unittest.TestCase):
-    def test_handedness_labels_stay_in_selfie_space(self) -> None:
-        self.assertEqual(_normalize_handedness_label("Left"), "left")
-        self.assertEqual(_normalize_handedness_label("Right"), "right")
+    def test_handedness_labels_map_back_to_physical_hands(self) -> None:
+        self.assertEqual(_normalize_handedness_label("Left"), "right")
+        self.assertEqual(_normalize_handedness_label("Right"), "left")
 
     def test_unknown_handedness_label_is_ignored(self) -> None:
         self.assertIsNone(_normalize_handedness_label("unknown"))

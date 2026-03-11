@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from config import HELP_LINES, SPEED_RANGE
+from config import HELP_LINES, MAX_TRAIL, MIN_TRAIL, SPEED_RANGE
 from hands.gestures import GestureInterpreter
 
 
@@ -16,6 +16,7 @@ def make_hand(
     pinky_mcp=(0.66, 0.50),
     thumb_tip=(0.52, 0.48),
     index_tip=(0.68, 0.28),
+    ring_tip=(0.62, 0.34),
     pinky_tip=(0.78, 0.30),
 ):
     points = [(wrist_x, wrist_y, 0.0) for _ in range(21)]
@@ -24,6 +25,7 @@ def make_hand(
     points[8] = (*index_tip, 0.0)
     points[9] = (*middle_mcp, 0.0)
     points[13] = (*ring_mcp, 0.0)
+    points[16] = (*ring_tip, 0.0)
     points[17] = (*pinky_mcp, 0.0)
     points[20] = (*pinky_tip, 0.0)
     return points
@@ -41,34 +43,88 @@ class GestureTests(unittest.TestCase):
         right_section = HELP_LINES[right_start:right_end]
         keys_section = HELP_LINES[keys_start:]
 
-        self.assertIn("Palm X -> Yaw", left_section)
-        self.assertIn("Palm Y -> Pitch", left_section)
-        self.assertIn("Pinch -> Speed", left_section)
+        self.assertIn("Thumb + index pinch -> Speed", left_section)
+        self.assertIn("Thumb + ring pinch -> Luminosity", left_section)
         self.assertIn("Pinky touch palm -> Previous attractor", left_section)
-        self.assertIn("Index Y -> Luminosity", right_section)
-        self.assertIn("Pinch -> Scale / zoom", right_section)
+        self.assertIn("Palm X -> Yaw", right_section)
+        self.assertIn("Palm Y -> Pitch", right_section)
+        self.assertIn("Thumb + index pinch -> Scale / zoom", right_section)
+        self.assertIn("Thumb + ring pinch -> Trail length", right_section)
         self.assertIn("Pinky touch palm -> Next attractor", right_section)
         self.assertTrue(any("[1-7] switch" in line for line in keys_section))
 
-    def test_left_pinch_controls_speed_and_right_maps_visuals(self) -> None:
+    def test_left_hand_controls_speed_and_ring_pinch_luminosity_while_right_controls_rotation_and_scale(self) -> None:
         interpreter = GestureInterpreter()
         left = make_hand(
             0.25,
-            0.75,
+            0.48,
             middle_mcp=(0.55, 0.75),
             thumb_tip=(0.30, 0.60),
             index_tip=(0.55, 0.60),
+            ring_tip=(0.54, 0.60),
         )
         right = make_hand(0.65, 0.35, thumb_tip=(0.60, 0.40), index_tip=(0.80, 0.20))
         frame = interpreter.update({"left": left, "right": right}, now=1.0)
-        self.assertLess(frame.yaw, 0.0)
-        self.assertGreater(frame.pitch, 0.0)
+        self.assertGreater(frame.yaw, 0.0)
+        self.assertLess(frame.pitch, 0.0)
         self.assertIsNotNone(frame.luminosity)
-        self.assertGreater(frame.luminosity, 0.05)
+        self.assertGreater(frame.luminosity, 0.85)
         self.assertGreater(frame.scale, 0.3)
+        self.assertGreater(frame.trail_len, MIN_TRAIL)
         self.assertAlmostEqual(frame.speed, SPEED_RANGE[1])
-        self.assertIsNone(frame.trail_len)
         self.assertEqual(frame.scene_delta, 0)
+
+    def test_left_hand_thumb_ring_pinch_controls_luminosity(self) -> None:
+        interpreter = GestureInterpreter()
+        bright = make_hand(
+            0.35,
+            0.40,
+            thumb_tip=(0.30, 0.52),
+            index_tip=(0.55, 0.52),
+            ring_tip=(0.54, 0.52),
+        )
+        dim = make_hand(
+            0.35,
+            0.40,
+            thumb_tip=(0.30, 0.52),
+            index_tip=(0.55, 0.52),
+            ring_tip=(0.31, 0.52),
+        )
+
+        bright_frame = interpreter.update({"left": bright, "right": None}, now=1.0)
+        dim_frame = interpreter.update({"left": dim, "right": None}, now=1.1)
+
+        self.assertIsNotNone(bright_frame.luminosity)
+        self.assertIsNotNone(dim_frame.luminosity)
+        self.assertGreater(bright_frame.luminosity, dim_frame.luminosity)
+        self.assertAlmostEqual(bright_frame.speed, dim_frame.speed)
+
+    def test_right_hand_thumb_ring_pinch_controls_trail_length(self) -> None:
+        interpreter = GestureInterpreter()
+        short_trail = make_hand(
+            0.65,
+            0.35,
+            thumb_tip=(0.60, 0.40),
+            index_tip=(0.80, 0.20),
+            ring_tip=(0.61, 0.40),
+        )
+        long_trail = make_hand(
+            0.65,
+            0.35,
+            thumb_tip=(0.60, 0.40),
+            index_tip=(0.80, 0.20),
+            ring_tip=(0.82, 0.40),
+        )
+
+        short_frame = interpreter.update({"left": None, "right": short_trail}, now=1.0)
+        long_frame = interpreter.update({"left": None, "right": long_trail}, now=1.1)
+
+        self.assertIsNotNone(short_frame.trail_len)
+        self.assertIsNotNone(long_frame.trail_len)
+        self.assertLess(short_frame.trail_len, long_frame.trail_len)
+        self.assertGreaterEqual(short_frame.trail_len, MIN_TRAIL)
+        self.assertLessEqual(long_frame.trail_len, MAX_TRAIL)
+        self.assertAlmostEqual(short_frame.scale, long_frame.scale)
 
     def test_pinky_touch_switches_scene_by_hand(self) -> None:
         interpreter = GestureInterpreter()

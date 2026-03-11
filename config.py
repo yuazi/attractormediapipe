@@ -18,7 +18,7 @@ PARTICLE_ALPHA_MAX = 128
 PARTICLE_ALPHA_MIN = 8
 GLOW_SPRITE_SIZE = 48
 
-MIN_TRAIL = 500
+MIN_TRAIL = 20_000
 LIVE_SAMPLE_COUNT = 5_000_000
 MAX_TRAIL = 100_000
 DEFAULT_TRAIL = 20_000
@@ -67,7 +67,6 @@ SPEED_RANGE = (0.1, 3.5)
 LUMINOSITY_RANGE = (0.05, 1.0)
 
 PINCH_RANGE = (0.02, 0.25)
-INDEX_Y_RANGE = (0.10, 0.90)
 
 SCENE_TURN_COOLDOWN_SECONDS = 0.55
 SCENE_SWITCH_PINKY_TOUCH_MAX_DISTANCE = 0.11
@@ -86,14 +85,15 @@ SNAPSHOT_SAMPLE_STRIDE = 1
 
 HELP_LINES = [
     "LEFT HAND",
-    "Palm X -> Yaw",
-    "Palm Y -> Pitch",
-    "Pinch -> Speed",
+    "Thumb + index pinch -> Speed",
+    "Thumb + ring pinch -> Luminosity",
     "Pinky touch palm -> Previous attractor",
     "",
     "RIGHT HAND",
-    "Index Y -> Luminosity",
-    "Pinch -> Scale / zoom",
+    "Palm X -> Yaw",
+    "Palm Y -> Pitch",
+    "Thumb + index pinch -> Scale / zoom",
+    "Thumb + ring pinch -> Trail length",
     "Pinky touch palm -> Next attractor",
     "",
     "KEYS",
