@@ -18,13 +18,77 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
-    def test_steps_for_speed_scales_with_speed(self) -> None:
+    def test_points_per_second_hits_configured_rate_at_max_speed(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
 
-        self.assertEqual(module._steps_for_speed(0.1), 1)
-        self.assertEqual(module._steps_for_speed(1.0), module.STEPS_PER_FRAME)
-        self.assertGreater(module._steps_for_speed(3.5), module.STEPS_PER_FRAME)
+        self.assertAlmostEqual(
+            module._points_per_second_for_speed(module.SPEED_RANGE[1]) * 60.0,
+            module.MAX_SPEED_POINTS_PER_MINUTE,
+        )
+        self.assertLess(module._points_per_second_for_speed(module.SPEED_RANGE[0]), module._points_per_second_for_speed(1.0))
+
+        sys.modules.pop("main", None)
+
+    def test_sample_budget_reaches_configured_points_per_minute_at_max_speed(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        sample_budget = 0.0
+        total_steps = 0
+        for _ in range(60 * 60):
+            steps, sample_budget = module._consume_sample_budget(sample_budget, module.SPEED_RANGE[1], 1.0 / 60.0)
+            total_steps += steps
+
+        self.assertEqual(total_steps, module.MAX_SPEED_POINTS_PER_MINUTE)
+        self.assertLess(sample_budget, 1.0)
+
+        sys.modules.pop("main", None)
+
+    def test_adjust_fog_clamps_to_range(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        controls = module.ControlState()
+        module._adjust_fog(controls, 10.0)
+        controls.smooth(alpha=1.0)
+        self.assertEqual(controls.fog, module.FOG_RANGE[1])
+
+        module._adjust_fog(controls, -10.0)
+        controls.smooth(alpha=1.0)
+        self.assertEqual(controls.fog, module.FOG_RANGE[0])
+
+        sys.modules.pop("main", None)
+
+    def test_slider_control_updates_fog_target(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        controls = module.ControlState()
+        module._apply_slider_control(controls, "fog", 0.35)
+        controls.smooth(alpha=1.0)
+
+        self.assertAlmostEqual(controls.fog, 0.35)
+
+        sys.modules.pop("main", None)
+
+    def test_live_render_data_uses_fixed_trail_length(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        class FakeManager:
+            def __init__(self) -> None:
+                self.limit = None
+
+            def get_render_data(self, limit: int):
+                self.limit = limit
+                return "positions", "ages"
+
+        manager = FakeManager()
+        positions, ages = module._get_live_render_data(manager)
+
+        self.assertEqual((positions, ages), ("positions", "ages"))
+        self.assertEqual(manager.limit, module.FIXED_TRAIL_LENGTH)
 
         sys.modules.pop("main", None)
 

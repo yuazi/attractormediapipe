@@ -8,7 +8,7 @@ WIN_H = 1100
 FPS = 60
 
 DEFAULT_DT = 0.005
-STEPS_PER_FRAME = 4
+MAX_SPEED_POINTS_PER_MINUTE = 500_000
 SMOOTH_ALPHA = 0.08
 DEFAULT_POINT_SIZE = 2.8
 
@@ -20,12 +20,13 @@ GLOW_SPRITE_SIZE = 48
 
 MIN_TRAIL = 20_000
 LIVE_SAMPLE_COUNT = 5_000_000
-MAX_TRAIL = 100_000
+MAX_TRAIL = 500_000
 DEFAULT_TRAIL = 20_000
 TRAIL_STEP_DELTA = 1000
 TRAIL_BUFFER_CAPACITY = LIVE_SAMPLE_COUNT
 PARTICLE_COUNT_RANGE = (1, 10)
 DEFAULT_PARTICLE_COUNT = 5
+FIXED_TRAIL_LENGTH = 100_000
 
 PIP_W = 272
 PIP_H = 153
@@ -54,6 +55,7 @@ CAMERA_DISTANCE = 5.0
 CAMERA_FOV = 520.0
 
 DEFAULT_LUMINOSITY = 0.82
+DEFAULT_FOG = 1.0
 DEFAULT_SCALE = 1.6
 DEFAULT_SPEED = 1.0
 DEFAULT_YAW = 0.0
@@ -65,6 +67,8 @@ PITCH_RANGE = (-90.0, 90.0)
 SCALE_RANGE = (0.5, 3.5)
 SPEED_RANGE = (0.1, 3.5)
 LUMINOSITY_RANGE = (0.05, 1.0)
+FOG_RANGE = (0.0, 1.0)
+FOG_STEP_DELTA = 0.05
 
 PINCH_RANGE = (0.02, 0.25)
 
@@ -94,7 +98,7 @@ HELP_LINES = [
     "Palm X -> Yaw",
     "Palm Y -> Pitch",
     "Thumb + index pinch -> Scale / zoom",
-    "Thumb + ring pinch -> Trail length",
+    "Thumb + ring pinch -> Fog",
     "Pinky touch palm -> Switch attractor",
     "",
     "KEYS",
@@ -102,7 +106,7 @@ HELP_LINES = [
     "[H] shortcuts  [C] camera  [M] pip mode",
     "[S] snapshot",
     "[ESC] quit  [UP/DOWN] speed",
-    "[LEFT/RIGHT] trail length  [WHEEL] zoom",
+    "[LEFT/RIGHT] fog  [WHEEL] zoom",
 ]
 
 

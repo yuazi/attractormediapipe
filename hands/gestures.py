@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from config import (
+    FOG_RANGE,
     LUMINOSITY_RANGE,
-    MAX_TRAIL,
-    MIN_TRAIL,
     PINCH_RANGE,
     PITCH_RANGE,
     SCALE_RANGE,
@@ -30,7 +29,7 @@ class GestureFrame:
     scale: Optional[float] = None
     speed: Optional[float] = None
     luminosity: Optional[float] = None
-    trail_len: Optional[int] = None
+    fog: Optional[float] = None
     reset_current: bool = False
     scene_delta: int = 0
     left_detected: bool = False
@@ -105,7 +104,7 @@ class GestureInterpreter:
             frame.yaw = remap(wrist_x, 0.0, 1.0, *YAW_RANGE)
             frame.pitch = remap(wrist_y, 0.0, 1.0, *PITCH_RANGE)
             frame.scale = remap(pinch_distance(right), *PINCH_RANGE, *SCALE_RANGE)
-            frame.trail_len = int(round(remap(ring_pinch_distance(right), *PINCH_RANGE, float(MIN_TRAIL), float(MAX_TRAIL))))
+            frame.fog = remap(ring_pinch_distance(right), *PINCH_RANGE, *FOG_RANGE)
             if self._consume_pinky_action("right", right, timestamp):
                 frame.scene_delta += 1
         else:

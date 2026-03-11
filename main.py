@@ -10,24 +10,24 @@ from config import (
     CAMERA_FRAME_HEIGHT,
     CAMERA_FRAME_WIDTH,
     DEFAULT_DT,
+    DEFAULT_FOG,
     DEFAULT_LUMINOSITY,
     DEFAULT_PITCH,
     DEFAULT_ROLL,
     DEFAULT_SCALE,
     DEFAULT_SPEED,
-    DEFAULT_TRAIL,
     DEFAULT_YAW,
+    FIXED_TRAIL_LENGTH,
+    FOG_RANGE,
+    FOG_STEP_DELTA,
     HAND_TRACKING_FPS,
-    MAX_TRAIL,
-    MIN_TRAIL,
+    MAX_SPEED_POINTS_PER_MINUTE,
     SCALE_RANGE,
     SNAPSHOT_BURN_IN,
     SNAPSHOT_SAMPLE_STRIDE,
     SNAPSHOT_SAMPLES,
     SMOOTH_ALPHA,
     SPEED_RANGE,
-    STEPS_PER_FRAME,
-    TRAIL_STEP_DELTA,
 )
 from hands import GestureInterpreter
 
@@ -57,8 +57,8 @@ class ControlState:
     roll: float = DEFAULT_ROLL
     zoom: float = DEFAULT_SCALE
     speed: float = DEFAULT_SPEED
+    fog: float = DEFAULT_FOG
     luminosity: float = DEFAULT_LUMINOSITY
-    trail_len: int = DEFAULT_TRAIL
     paused: bool = False
     show_overlay: bool = True
     show_shortcuts: bool = True
@@ -70,6 +70,7 @@ class ControlState:
             "pitch": DEFAULT_PITCH,
             "zoom": DEFAULT_SCALE,
             "speed": DEFAULT_SPEED,
+            "fog": DEFAULT_FOG,
             "luminosity": DEFAULT_LUMINOSITY,
         }
     )
@@ -78,12 +79,13 @@ class ControlState:
         self._targets[name] = value
 
     def smooth(self, alpha: float = SMOOTH_ALPHA) -> None:
-        for key in ("yaw", "pitch", "zoom", "speed", "luminosity"):
+        for key in ("yaw", "pitch", "zoom", "speed", "fog", "luminosity"):
             current = getattr(self, key)
             target = self._targets[key]
             setattr(self, key, current + alpha * (target - current))
         self.zoom = max(SCALE_RANGE[0], min(SCALE_RANGE[1], self.zoom))
         self.speed = max(SPEED_RANGE[0], min(SPEED_RANGE[1], self.speed))
+        self.fog = max(FOG_RANGE[0], min(FOG_RANGE[1], self.fog))
         self.luminosity = max(0.05, min(1.0, self.luminosity))
 
 
@@ -203,23 +205,34 @@ def _adjust_speed(controls: ControlState, delta: float) -> None:
     controls.set_target("speed", max(SPEED_RANGE[0], min(SPEED_RANGE[1], controls._targets["speed"] + delta)))
 
 
-def _adjust_trail(controls: ControlState, delta: int) -> None:
-    controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, controls.trail_len + delta))
+def _adjust_fog(controls: ControlState, delta: float) -> None:
+    controls.set_target("fog", max(FOG_RANGE[0], min(FOG_RANGE[1], controls._targets["fog"] + delta)))
 
 
 def _adjust_zoom(controls: ControlState, factor: float) -> None:
     controls.set_target("zoom", max(SCALE_RANGE[0], min(SCALE_RANGE[1], controls._targets["zoom"] * factor)))
 
 
-def _steps_for_speed(speed: float) -> int:
-    return max(1, int(round(STEPS_PER_FRAME * max(SPEED_RANGE[0], speed))))
+def _points_per_second_for_speed(speed: float) -> float:
+    clamped_speed = max(SPEED_RANGE[0], min(SPEED_RANGE[1], speed))
+    return (MAX_SPEED_POINTS_PER_MINUTE / 60.0) * (clamped_speed / SPEED_RANGE[1])
+
+
+def _consume_sample_budget(sample_budget: float, speed: float, frame_delta: float) -> tuple[int, float]:
+    updated_budget = max(0.0, sample_budget) + (_points_per_second_for_speed(speed) * max(0.0, frame_delta))
+    steps = int(updated_budget + 1e-9)
+    return steps, updated_budget - steps
+
+
+def _get_live_render_data(manager: AttractorManager) -> tuple[object, object]:
+    return manager.get_render_data(FIXED_TRAIL_LENGTH)
 
 
 def _apply_slider_control(controls: ControlState, slider_id: str, value: float) -> None:
     if slider_id == "speed":
         controls.set_target("speed", value)
-    elif slider_id == "trail_len":
-        controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, int(round(value))))
+    elif slider_id == "fog":
+        controls.set_target("fog", value)
     elif slider_id == "luminosity":
         controls.set_target("luminosity", value)
     elif slider_id == "scale":
@@ -304,6 +317,7 @@ def main(argv: list[str] | None = None) -> None:
     running = True
     frame_count = 0
     animation_time = 0.0
+    sample_budget = 0.0
     last_frame_time = time.perf_counter()
     active_slider: str | None = None
     hover_slider: str | None = None
@@ -332,6 +346,7 @@ def main(argv: list[str] | None = None) -> None:
                         controls.paused = not controls.paused
                     elif event.key == pygame.K_r:
                         _restart_current_trail(manager)
+                        sample_budget = 0.0
                     elif event.key == pygame.K_s:
                         snapshotter.start(
                             SnapshotRequest(
@@ -355,14 +370,15 @@ def main(argv: list[str] | None = None) -> None:
                     elif pygame.K_1 <= event.key < pygame.K_1 + manager.total:
                         manager.switch_to(event.key - pygame.K_1)
                         _prime_live_trail(manager)
+                        sample_budget = 0.0
                     elif event.key == pygame.K_UP:
                         _adjust_speed(controls, 0.1)
                     elif event.key == pygame.K_DOWN:
                         _adjust_speed(controls, -0.1)
                     elif event.key == pygame.K_LEFT:
-                        _adjust_trail(controls, -TRAIL_STEP_DELTA)
+                        _adjust_fog(controls, -FOG_STEP_DELTA)
                     elif event.key == pygame.K_RIGHT:
-                        _adjust_trail(controls, TRAIL_STEP_DELTA)
+                        _adjust_fog(controls, FOG_STEP_DELTA)
                 elif (
                     event.type == pygame.MOUSEBUTTONDOWN
                     and event.button == 1
@@ -378,10 +394,12 @@ def main(argv: list[str] | None = None) -> None:
                         if hovered_nav_index is not None:
                             manager.switch_to(hovered_nav_index)
                             _prime_live_trail(manager)
+                            sample_budget = 0.0
                             active_slider = None
                         elif renderer.reset_button_hit_test(manager.names, event.pos):
                             active_slider = None
                             _restart_current_trail(manager)
+                            sample_budget = 0.0
                         else:
                             active_slider = renderer.control_hit_test(manager.names, event.pos)
                         hover_nav_index = hovered_nav_index
@@ -434,26 +452,30 @@ def main(argv: list[str] | None = None) -> None:
                 controls.set_target("pitch", gesture_frame.pitch)
             if gesture_frame.speed is not None:
                 controls.set_target("speed", gesture_frame.speed)
+            if gesture_frame.fog is not None:
+                controls.set_target("fog", gesture_frame.fog)
             if gesture_frame.luminosity is not None:
                 controls.set_target("luminosity", gesture_frame.luminosity)
             if gesture_frame.scale is not None:
                 controls.set_target("zoom", gesture_frame.scale)
-            if gesture_frame.trail_len is not None:
-                controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, int(round(gesture_frame.trail_len))))
             if gesture_frame.reset_current:
                 left_reset_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
                 _restart_current_trail(manager)
+                sample_budget = 0.0
             if gesture_frame.scene_delta:
                 switch_now = time.monotonic()
                 right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
                 manager.switch_relative(gesture_frame.scene_delta)
                 _prime_live_trail(manager)
+                sample_budget = 0.0
 
             controls.smooth()
 
             if not controls.paused:
-                manager.step_many(DEFAULT_DT * controls.speed, _steps_for_speed(controls.speed))
-            positions, ages = manager.get_render_data(controls.trail_len)
+                steps, sample_budget = _consume_sample_budget(sample_budget, controls.speed, frame_delta)
+                if steps > 0:
+                    manager.step_many(DEFAULT_DT * controls.speed, steps)
+            positions, ages = _get_live_render_data(manager)
             caption_now = time.monotonic()
             left_pip_caption = "Reset" if caption_now < left_reset_caption_until else "Speed"
             right_pip_caption = "Switch" if caption_now < right_switch_caption_until else "Scale"
@@ -478,8 +500,8 @@ def main(argv: list[str] | None = None) -> None:
                     roll=controls.roll,
                     zoom=controls.zoom,
                     speed=controls.speed,
+                    fog=controls.fog,
                     luminosity=controls.luminosity,
-                    trail_len=controls.trail_len,
                     point_count=manager.count,
                     fps=renderer.clock.get_fps(),
                     paused=controls.paused,

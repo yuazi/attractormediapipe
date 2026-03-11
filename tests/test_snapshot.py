@@ -11,7 +11,15 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
-from renderer.snapshot import SnapshotController, SnapshotRequest, _render_density_image, ensure_snapshot_environment, export_attractor_snapshot, snapshot_filename
+from renderer.snapshot import (
+    SnapshotController,
+    SnapshotRequest,
+    _cover_frame_points,
+    _render_density_image,
+    ensure_snapshot_environment,
+    export_attractor_snapshot,
+    snapshot_filename,
+)
 
 
 class SnapshotTests(unittest.TestCase):
@@ -38,6 +46,30 @@ class SnapshotTests(unittest.TestCase):
             self.assertGreater(os.path.getsize(output_path), 0)
             with Image.open(output_path) as image:
                 self.assertEqual(image.size, (3840, 2160))
+                bbox = image.convert("L").point(lambda value: 255 if value > 0 else 0).getbbox()
+                self.assertIsNotNone(bbox)
+                assert bbox is not None
+                width = bbox[2] - bbox[0]
+                height = bbox[3] - bbox[1]
+                self.assertGreater(width, int(image.width * 0.70))
+                self.assertGreater(height, int(image.height * 0.70))
+
+    def test_cover_frame_points_scales_to_cover_snapshot_canvas(self) -> None:
+        points = np.array(
+            [
+                [-0.30, -0.10],
+                [0.30, -0.10],
+                [-0.30, 0.10],
+                [0.30, 0.10],
+            ],
+            dtype=np.float32,
+        )
+
+        covered = _cover_frame_points(points, overscan=1.0)
+
+        self.assertLessEqual(float(np.min(covered[:, 1])), -1.0)
+        self.assertGreaterEqual(float(np.max(covered[:, 1])), 1.0)
+        self.assertGreater(float(np.max(np.abs(covered[:, 0]))), 1.0)
 
     def test_snapshot_request_rejects_invalid_sampling_parameters(self) -> None:
         kwargs = dict(

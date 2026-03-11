@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from config import HELP_LINES, MAX_TRAIL, MIN_TRAIL, SPEED_RANGE
+from config import FOG_RANGE, HELP_LINES, SPEED_RANGE
 from hands.gestures import GestureInterpreter
 
 
@@ -49,8 +49,9 @@ class GestureTests(unittest.TestCase):
         self.assertIn("Palm X -> Yaw", right_section)
         self.assertIn("Palm Y -> Pitch", right_section)
         self.assertIn("Thumb + index pinch -> Scale / zoom", right_section)
-        self.assertIn("Thumb + ring pinch -> Trail length", right_section)
+        self.assertIn("Thumb + ring pinch -> Fog", right_section)
         self.assertIn("Pinky touch palm -> Switch attractor", right_section)
+        self.assertTrue(any("[LEFT/RIGHT] fog" in line for line in keys_section))
         self.assertTrue(any("[1-9] switch" in line for line in keys_section))
 
     def test_left_hand_controls_speed_and_ring_pinch_luminosity_while_right_controls_rotation_and_scale(self) -> None:
@@ -70,10 +71,12 @@ class GestureTests(unittest.TestCase):
         self.assertIsNotNone(frame.luminosity)
         self.assertGreater(frame.luminosity, 0.85)
         self.assertGreater(frame.scale, 0.3)
-        self.assertGreater(frame.trail_len, MIN_TRAIL)
+        self.assertIsNotNone(frame.fog)
+        self.assertGreater(frame.fog, FOG_RANGE[0])
         self.assertAlmostEqual(frame.speed, SPEED_RANGE[1])
         self.assertFalse(frame.reset_current)
         self.assertEqual(frame.scene_delta, 0)
+        self.assertFalse(hasattr(frame, "trail_len"))
 
     def test_left_hand_thumb_ring_pinch_controls_luminosity(self) -> None:
         interpreter = GestureInterpreter()
@@ -100,16 +103,16 @@ class GestureTests(unittest.TestCase):
         self.assertGreater(bright_frame.luminosity, dim_frame.luminosity)
         self.assertAlmostEqual(bright_frame.speed, dim_frame.speed)
 
-    def test_right_hand_thumb_ring_pinch_controls_trail_length(self) -> None:
+    def test_right_hand_thumb_ring_pinch_controls_fog(self) -> None:
         interpreter = GestureInterpreter()
-        short_trail = make_hand(
+        low_fog = make_hand(
             0.65,
             0.35,
             thumb_tip=(0.60, 0.40),
             index_tip=(0.80, 0.20),
             ring_tip=(0.61, 0.40),
         )
-        long_trail = make_hand(
+        high_fog = make_hand(
             0.65,
             0.35,
             thumb_tip=(0.60, 0.40),
@@ -117,15 +120,16 @@ class GestureTests(unittest.TestCase):
             ring_tip=(0.82, 0.40),
         )
 
-        short_frame = interpreter.update({"left": None, "right": short_trail}, now=1.0)
-        long_frame = interpreter.update({"left": None, "right": long_trail}, now=1.1)
+        low_frame = interpreter.update({"left": None, "right": low_fog}, now=1.0)
+        high_frame = interpreter.update({"left": None, "right": high_fog}, now=1.1)
 
-        self.assertIsNotNone(short_frame.trail_len)
-        self.assertIsNotNone(long_frame.trail_len)
-        self.assertLess(short_frame.trail_len, long_frame.trail_len)
-        self.assertGreaterEqual(short_frame.trail_len, MIN_TRAIL)
-        self.assertLessEqual(long_frame.trail_len, MAX_TRAIL)
-        self.assertAlmostEqual(short_frame.scale, long_frame.scale)
+        self.assertIsNotNone(low_frame.fog)
+        self.assertIsNotNone(high_frame.fog)
+        self.assertLess(low_frame.fog, high_frame.fog)
+        self.assertGreaterEqual(low_frame.fog, FOG_RANGE[0])
+        self.assertLessEqual(high_frame.fog, FOG_RANGE[1])
+        self.assertAlmostEqual(low_frame.scale, high_frame.scale)
+        self.assertFalse(hasattr(low_frame, "trail_len"))
 
     def test_left_pinky_resets_and_right_pinky_switches(self) -> None:
         interpreter = GestureInterpreter()

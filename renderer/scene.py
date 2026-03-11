@@ -13,10 +13,9 @@ from config import (
     BACKGROUND_COLOR,
     CAPTION,
     DEFAULT_POINT_SIZE,
+    FOG_RANGE,
     FPS,
     LUMINOSITY_RANGE,
-    MAX_TRAIL,
-    MIN_TRAIL,
     PIP_H,
     PIP_W,
     SCALE_RANGE,
@@ -134,7 +133,7 @@ void main() {
 
 CONTROL_SLIDERS = (
     ("speed", SPEED_RANGE),
-    ("trail_len", (float(MIN_TRAIL), float(MAX_TRAIL))),
+    ("fog", FOG_RANGE),
     ("luminosity", LUMINOSITY_RANGE),
     ("scale", SCALE_RANGE),
 )
@@ -160,7 +159,7 @@ HUD_SHORTCUTS = (
     ("L RING", "Luminosity"),
     ("R PALM", "Yaw and pitch"),
     ("R PINCH", "Scale"),
-    ("R RING", "Trail length"),
+    ("R RING", "Fog"),
     ("R PINKY", "Switch study"),
 )
 
@@ -208,8 +207,8 @@ class SceneState:
     roll: float
     zoom: float
     speed: float
+    fog: float
     luminosity: float
-    trail_len: int
     point_count: int
     fps: float
     paused: bool
@@ -395,7 +394,7 @@ class SceneRenderer:
         layout = self._hud_layout(state.attractor_names)
         background = tuple(channel / 255.0 for channel in BACKGROUND_COLOR)
         self.ctx.clear(background[0], background[1], background[2], 1.0)
-        self._render_atmosphere(accent)
+        self._render_atmosphere(accent, state.fog)
 
         if state.fps > 0.0:
             self._fps_history.append(state.fps)
@@ -445,7 +444,7 @@ class SceneRenderer:
                 rect=layout.pip_rect,
             )
 
-    def _render_atmosphere(self, accent: tuple[int, int, int]) -> None:
+    def _render_atmosphere(self, accent: tuple[int, int, int], fog: float) -> None:
         cache_key = (self.width, self.height, accent)
         pixels = self._atmosphere_cache.get(cache_key)
         if pixels is None:
@@ -471,7 +470,7 @@ class SceneRenderer:
             self._atmosphere_cache[cache_key] = pixels
 
         self.overlay_texture.write(pixels)
-        self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height))
+        self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height), opacity=fog)
 
     def _draw_overlay(self, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
         image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
@@ -718,7 +717,7 @@ class SceneRenderer:
 
         rows = {
             "speed": ("Speed", state.speed, SPEED_RANGE, accent),
-            "trail_len": ("Trail length", float(state.trail_len), (float(MIN_TRAIL), float(MAX_TRAIL)), accent),
+            "fog": ("Fog", state.fog, FOG_RANGE, accent),
             "luminosity": ("Luminosity", state.luminosity, LUMINOSITY_RANGE, accent),
             "scale": ("Scale", state.zoom, SCALE_RANGE, accent),
         }
@@ -765,7 +764,7 @@ class SceneRenderer:
         minimum, maximum = value_range
         ratio = 0.0 if maximum <= minimum else max(0.0, min(1.0, (value - minimum) / (maximum - minimum)))
         track_y = y + s(24)
-        value_text = f"{int(round(value)):,}" if label == "Trail length" else f"{value:0.2f}"
+        value_text = f"{value:0.2f}"
         draw.text((x, y), label.upper(), font=self._font_mono_8, fill=self._rgba(HUD_WHITE, 140))
         value_width = self._text_width(value_text, self._font_mono_11)
         draw.text((x + width - value_width, y - s(1)), value_text, font=self._font_mono_11, fill=self._rgba(HUD_WHITE, 255))
@@ -956,8 +955,6 @@ class SceneRenderer:
         minimum, maximum = dict(CONTROL_SLIDERS)[slider_id]
         ratio = 0.0 if right <= left else max(0.0, min(1.0, (x_position - left) / (right - left)))
         value = minimum + (maximum - minimum) * ratio
-        if slider_id == "trail_len":
-            return float(int(round(value / 100.0) * 100))
         return round(value, 2)
 
     def _wrap_lines(self, text: str, width: int) -> list[str]:

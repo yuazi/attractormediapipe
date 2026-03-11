@@ -159,6 +159,25 @@ def _render_density_image(density: np.ndarray, luminosity: float, accent: tuple[
     return np.clip(np.power(rgb, 0.92), 0.0, 1.0)
 
 
+def _cover_frame_points(points_2d: np.ndarray, overscan: float = 1.02) -> np.ndarray:
+    if len(points_2d) == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    coords = np.asarray(points_2d, dtype=np.float32)
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0)
+    center = (mins + maxs) * np.float32(0.5)
+    centered = coords - center
+    half_extents = np.max(np.abs(centered), axis=0)
+    max_extent = float(np.max(half_extents))
+    min_extent = float(np.min(half_extents))
+    if max_extent < 1e-6:
+        return centered.astype(np.float32, copy=False)
+    cover_extent = min_extent if min_extent >= 1e-6 else max_extent
+    scale = np.float32(overscan / cover_extent)
+    return (centered * scale).astype(np.float32, copy=False)
+
+
 def export_attractor_snapshot(request: SnapshotRequest) -> str:
     ensure_snapshot_environment()
     ds, pd = _import_datashader_dependencies()
@@ -197,8 +216,18 @@ def export_attractor_snapshot(request: SnapshotRequest) -> str:
     if not np.any(in_bounds):
         raise RuntimeError("Snapshot export produced no visible points in bounds")
 
-    x = ndc[in_bounds, 0].astype(np.float32, copy=False)
-    y = (-ndc[in_bounds, 1]).astype(np.float32, copy=False)
+    framed = _cover_frame_points(ndc[in_bounds, :2])
+    reframed_in_bounds = (
+        (framed[:, 0] >= -1.0)
+        & (framed[:, 0] <= 1.0)
+        & (framed[:, 1] >= -1.0)
+        & (framed[:, 1] <= 1.0)
+    )
+    if not np.any(reframed_in_bounds):
+        raise RuntimeError("Snapshot export reframing removed all visible points")
+
+    x = framed[reframed_in_bounds, 0].astype(np.float32, copy=False)
+    y = (-framed[reframed_in_bounds, 1]).astype(np.float32, copy=False)
     dataframe = pd.DataFrame({"x": x, "y": y})
     canvas = ds.Canvas(plot_width=request.width, plot_height=request.height, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0))
     density = canvas.points(dataframe, "x", "y", agg=ds.count())
