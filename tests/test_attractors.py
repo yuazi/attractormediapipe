@@ -46,6 +46,24 @@ class AttractorTests(unittest.TestCase):
             ("Lorenz", "Aizawa", "Sprott B", "Thomas", "Dadras", "Chen", "Langford", "Rossler", "Halvorsen"),
         )
 
+    def test_manager_uses_hud_accent_palette(self) -> None:
+        manager = self.make_manager()
+        expected_colors = {
+            "Lorenz": (230, 57, 70),
+            "Aizawa": (255, 209, 102),
+            "Sprott B": (6, 214, 160),
+            "Thomas": (255, 107, 157),
+            "Dadras": (76, 201, 240),
+            "Chen": (199, 125, 255),
+            "Langford": (17, 138, 178),
+            "Rossler": (244, 162, 97),
+            "Halvorsen": (82, 183, 136),
+        }
+
+        for index, name in enumerate(manager.names):
+            manager.switch_to(index)
+            self.assertEqual(manager.color, expected_colors[name])
+
     def test_active_placards_use_attractor_specific_medium_descriptions(self) -> None:
         manager = self.make_manager()
         expected_media = {
@@ -151,6 +169,13 @@ class AttractorTests(unittest.TestCase):
         render_points, ages = manager.get_render_data(64)
         self.assertEqual(render_points.shape, (64, 3))
         self.assertEqual(ages.shape, (64,))
+
+    def test_sample_points_rejects_invalid_sampling_parameters(self) -> None:
+        attractor = LorenzAttractor()
+        with self.assertRaisesRegex(ValueError, "burn_in"):
+            attractor.sample_points(16, dt=0.005, burn_in=-1)
+        with self.assertRaisesRegex(ValueError, "sample_stride"):
+            attractor.sample_points(16, dt=0.005, sample_stride=0)
 
 
 if __name__ == "__main__":

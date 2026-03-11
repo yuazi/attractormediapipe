@@ -15,6 +15,7 @@ from PIL import Image
 from attractors.manager import create_active_attractor, normalize_points
 from config import (
     DEFAULT_DT,
+    SCREENSHOT_DIR,
     SCREENSHOT_PREFIX,
     SNAPSHOT_BURN_IN,
     SNAPSHOT_HEIGHT,
@@ -43,6 +44,18 @@ class SnapshotRequest:
     sample_stride: int = SNAPSHOT_SAMPLE_STRIDE
     dt: float = DEFAULT_DT
     state: tuple[float, float, float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.width < 1 or self.height < 1:
+            raise ValueError("snapshot dimensions must be >= 1")
+        if self.sample_count < 1:
+            raise ValueError("sample_count must be >= 1")
+        if self.burn_in < 0:
+            raise ValueError("burn_in must be >= 0")
+        if self.sample_stride < 1:
+            raise ValueError("sample_stride must be >= 1")
+        if self.dt <= 0.0:
+            raise ValueError("dt must be > 0")
 
 
 def ensure_snapshot_environment() -> str:
@@ -102,7 +115,7 @@ def _import_datashader_dependencies():
 
 def snapshot_filename(prefix: str = SCREENSHOT_PREFIX) -> str:
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    return f"{prefix}_{timestamp}.png"
+    return str(Path(SCREENSHOT_DIR) / f"{prefix}_{timestamp}.png")
 
 
 def inferno_palette(values: np.ndarray) -> np.ndarray:
@@ -214,6 +227,11 @@ class SnapshotController:
         self._thread.start()
         return True
 
+    def close(self) -> None:
+        thread = self._thread
+        if thread is not None:
+            thread.join()
+
     def _run(self, request: SnapshotRequest) -> None:
         try:
             path = export_attractor_snapshot(request)
@@ -225,3 +243,4 @@ class SnapshotController:
         with self._lock:
             self._is_running = False
             self._message = message
+            self._thread = None

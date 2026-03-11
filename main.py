@@ -44,9 +44,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--screenshot-path", type=str, default="", help="Output path for snapshot-only or headless export")
     parser.add_argument("--snapshot-only", action="store_true", help="Export a Datashader snapshot and exit")
     parser.add_argument("--attractor", type=str, default="", help="Active attractor name for startup or snapshot export")
-    parser.add_argument("--snapshot-samples", type=int, default=0, help="Override the default Datashader sample count")
-    parser.add_argument("--snapshot-burn-in", type=int, default=0, help="Override the default Datashader burn-in steps")
-    parser.add_argument("--snapshot-stride", type=int, default=0, help="Override the default Datashader sample stride")
+    parser.add_argument("--snapshot-samples", type=int, default=None, help="Override the default Datashader sample count")
+    parser.add_argument("--snapshot-burn-in", type=int, default=None, help="Override the default Datashader burn-in steps")
+    parser.add_argument("--snapshot-stride", type=int, default=None, help="Override the default Datashader sample stride")
     return parser.parse_args(argv)
 
 
@@ -61,7 +61,8 @@ class ControlState:
     trail_len: int = DEFAULT_TRAIL
     paused: bool = False
     show_overlay: bool = True
-    show_camera: bool = False
+    show_shortcuts: bool = True
+    show_camera: bool = True
     focus_mode: bool = False
     _targets: dict = field(
         default_factory=lambda: {
@@ -183,7 +184,19 @@ def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSessio
         capture.set(cv2.CAP_PROP_FPS, HAND_TRACKING_FPS)
     if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return CameraTrackerSession(capture, HandTracker(), cv2)
+    tracker = None
+    try:
+        tracker = HandTracker()
+        return CameraTrackerSession(capture, tracker, cv2)
+    except Exception as exc:
+        capture.release()
+        if tracker is not None:
+            try:
+                tracker.close()
+            except Exception:
+                pass
+        print(f"Camera disabled: {exc}")
+        return None
 
 
 def _adjust_speed(controls: ControlState, delta: float) -> None:
@@ -223,19 +236,25 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
     if attractor_name is None:
         raise SystemExit(f"Unknown active attractor '{requested_name}'. Available: {', '.join(available)}")
 
-    request = SnapshotRequest(
-        attractor_name=attractor_name,
-        yaw=DEFAULT_YAW,
-        pitch=DEFAULT_PITCH,
-        roll=DEFAULT_ROLL,
-        zoom=DEFAULT_SCALE,
-        time_value=0.0,
-        luminosity=DEFAULT_LUMINOSITY,
-        output_path=args.screenshot_path,
-        sample_count=args.snapshot_samples or SNAPSHOT_SAMPLES,
-        burn_in=args.snapshot_burn_in or SNAPSHOT_BURN_IN,
-        sample_stride=args.snapshot_stride or SNAPSHOT_SAMPLE_STRIDE,
-    )
+    sample_count = SNAPSHOT_SAMPLES if args.snapshot_samples is None else args.snapshot_samples
+    burn_in = SNAPSHOT_BURN_IN if args.snapshot_burn_in is None else args.snapshot_burn_in
+    sample_stride = SNAPSHOT_SAMPLE_STRIDE if args.snapshot_stride is None else args.snapshot_stride
+    try:
+        request = SnapshotRequest(
+            attractor_name=attractor_name,
+            yaw=DEFAULT_YAW,
+            pitch=DEFAULT_PITCH,
+            roll=DEFAULT_ROLL,
+            zoom=DEFAULT_SCALE,
+            time_value=0.0,
+            luminosity=DEFAULT_LUMINOSITY,
+            output_path=args.screenshot_path,
+            sample_count=sample_count,
+            burn_in=burn_in,
+            sample_stride=sample_stride,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     output = export_attractor_snapshot(request)
     print(f"Saved snapshot: {output}")
     return output
@@ -287,6 +306,11 @@ def main(argv: list[str] | None = None) -> None:
     animation_time = 0.0
     last_frame_time = time.perf_counter()
     active_slider: str | None = None
+    hover_slider: str | None = None
+    hover_nav_index: int | None = None
+    hover_reset = False
+    hover_shortcuts_toggle = False
+    hover_pip = False
     left_reset_caption_until = 0.0
     right_switch_caption_until = 0.0
 
@@ -322,11 +346,12 @@ def main(argv: list[str] | None = None) -> None:
                             )
                         )
                     elif event.key == pygame.K_h:
-                        controls.show_overlay = not controls.show_overlay
+                        controls.show_shortcuts = not controls.show_shortcuts
                     elif event.key == pygame.K_c:
                         controls.show_camera = not controls.show_camera
                     elif event.key == pygame.K_m:
                         controls.focus_mode = not controls.focus_mode
+                        controls.show_camera = True
                     elif pygame.K_1 <= event.key < pygame.K_1 + manager.total:
                         manager.switch_to(event.key - pygame.K_1)
                         _prime_live_trail(manager)
@@ -344,14 +369,38 @@ def main(argv: list[str] | None = None) -> None:
                     and controls.show_overlay
                     and not controls.focus_mode
                 ):
-                    if renderer.reset_button_hit_test(manager.names, event.pos):
+                    if renderer.shortcuts_toggle_hit_test(manager.names, event.pos, controls.show_shortcuts):
+                        controls.show_shortcuts = not controls.show_shortcuts
+                        hover_shortcuts_toggle = renderer.shortcuts_toggle_hit_test(manager.names, event.pos, controls.show_shortcuts)
                         active_slider = None
-                        _restart_current_trail(manager)
                     else:
-                        active_slider = renderer.control_hit_test(manager.names, event.pos)
+                        hovered_nav_index = renderer.navigation_hit_test(manager.names, event.pos)
+                        if hovered_nav_index is not None:
+                            manager.switch_to(hovered_nav_index)
+                            _prime_live_trail(manager)
+                            active_slider = None
+                        elif renderer.reset_button_hit_test(manager.names, event.pos):
+                            active_slider = None
+                            _restart_current_trail(manager)
+                        else:
+                            active_slider = renderer.control_hit_test(manager.names, event.pos)
+                        hover_nav_index = hovered_nav_index
                     if active_slider is not None:
                         slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
                         _apply_slider_control(controls, active_slider, slider_value)
+                    hover_slider = active_slider
+                    hover_reset = renderer.reset_button_hit_test(manager.names, event.pos)
+                    hover_pip = renderer.pip_hit_test(manager.names, event.pos)
+                elif event.type == pygame.MOUSEMOTION and controls.show_overlay and not controls.focus_mode:
+                    hover_slider = renderer.control_hit_test(manager.names, event.pos)
+                    hover_nav_index = renderer.navigation_hit_test(manager.names, event.pos)
+                    hover_reset = renderer.reset_button_hit_test(manager.names, event.pos)
+                    hover_shortcuts_toggle = renderer.shortcuts_toggle_hit_test(manager.names, event.pos, controls.show_shortcuts)
+                    hover_pip = renderer.pip_hit_test(manager.names, event.pos)
+                    if active_slider is not None:
+                        slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
+                        _apply_slider_control(controls, active_slider, slider_value)
+                        hover_slider = active_slider
                 elif event.type == pygame.MOUSEWHEEL:
                     _adjust_zoom(controls, 1.12 if event.y > 0 else 1.0 / 1.12)
                 elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -364,6 +413,12 @@ def main(argv: list[str] | None = None) -> None:
                 elif event.type == pygame.MOUSEMOTION and active_slider is not None:
                     slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
                     _apply_slider_control(controls, active_slider, slider_value)
+                elif event.type == pygame.WINDOWLEAVE:
+                    hover_slider = None
+                    hover_nav_index = None
+                    hover_reset = False
+                    hover_shortcuts_toggle = False
+                    hover_pip = False
 
             hand_data = {"left": None, "right": None}
             camera_frame = None
@@ -431,9 +486,15 @@ def main(argv: list[str] | None = None) -> None:
                     exporting=snapshotter.is_running,
                     export_message=snapshotter.message,
                     show_overlay=controls.show_overlay,
+                    show_shortcuts=controls.show_shortcuts,
                     show_camera=controls.show_camera,
                     focus_mode=controls.focus_mode,
                     active_slider=active_slider,
+                    hover_slider=hover_slider,
+                    hover_nav_index=hover_nav_index,
+                    hover_reset=hover_reset,
+                    hover_shortcuts_toggle=hover_shortcuts_toggle,
+                    hover_pip=hover_pip,
                     left_detected=gesture_frame.left_detected,
                     right_detected=gesture_frame.right_detected,
                     pip_frame=camera_frame,
@@ -453,6 +514,7 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         if camera_session is not None:
             camera_session.close()
+        snapshotter.close()
         renderer.quit()
 
 

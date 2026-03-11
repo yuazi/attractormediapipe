@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-import urllib.request
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from config import CAMERA_FRAME_HEIGHT, CAMERA_FRAME_WIDTH, HAND_TRACKING_FPS
@@ -28,16 +27,11 @@ except ImportError:  # pragma: no cover - optional dependency
 _MODEL_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "assets", "hand_landmarker.task"
 )
-_MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/"
-    "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
-)
 
 
 def _ensure_model() -> str:
     if not os.path.exists(_MODEL_PATH):
-        os.makedirs(os.path.dirname(_MODEL_PATH), exist_ok=True)
-        urllib.request.urlretrieve(_MODEL_URL, _MODEL_PATH)
+        raise RuntimeError(f"Missing bundled MediaPipe model: {_MODEL_PATH}")
     return _MODEL_PATH
 
 

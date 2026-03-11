@@ -189,6 +189,18 @@ class GestureTests(unittest.TestCase):
         self.assertTrue(frame.reset_current)
         self.assertEqual(frame.scene_delta, 0)
 
+    def test_left_and_right_pinky_actions_have_independent_cooldowns(self) -> None:
+        interpreter = GestureInterpreter()
+        trigger = make_hand(0.50, 0.50, pinky_tip=(0.54, 0.46))
+        release = make_hand(0.50, 0.50, pinky_tip=(0.82, 0.26))
+
+        left_frame = interpreter.update({"left": trigger, "right": None}, now=0.10)
+        interpreter.update({"left": release, "right": None}, now=0.20)
+        right_frame = interpreter.update({"left": None, "right": trigger}, now=0.30)
+
+        self.assertTrue(left_frame.reset_current)
+        self.assertEqual(right_frame.scene_delta, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

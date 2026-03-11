@@ -27,8 +27,8 @@ TRAIL_BUFFER_CAPACITY = LIVE_SAMPLE_COUNT
 PARTICLE_COUNT_RANGE = (1, 10)
 DEFAULT_PARTICLE_COUNT = 5
 
-PIP_W = 320
-PIP_H = 180
+PIP_W = 272
+PIP_H = 153
 PIP_MARGIN = 12
 OVERLAY_W = 700
 OVERLAY_H = 260
@@ -77,6 +77,7 @@ BLOOM_ALPHA = 24
 
 CAPTION = "(y)us particle attractor"
 SCREENSHOT_PREFIX = "attractor"
+SCREENSHOT_DIR = "screenshot"
 SNAPSHOT_WIDTH = 3840
 SNAPSHOT_HEIGHT = 2160
 SNAPSHOT_SAMPLES = LIVE_SAMPLE_COUNT
@@ -98,7 +99,7 @@ HELP_LINES = [
     "",
     "KEYS",
     "[1-9] switch  [R] restart trail  [SPACE] pause",
-    "[H] overlay  [C] camera  [M] pip mode",
+    "[H] shortcuts  [C] camera  [M] pip mode",
     "[S] snapshot",
     "[ESC] quit  [UP/DOWN] speed",
     "[LEFT/RIGHT] trail length  [WHEEL] zoom",

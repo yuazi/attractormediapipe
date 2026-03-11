@@ -80,7 +80,7 @@ def pinky_touch_distance(landmarks: List[Landmark]) -> float:
 
 class GestureInterpreter:
     def __init__(self) -> None:
-        self._last_pinky_action_time = float("-inf")
+        self._last_pinky_action_time = {"left": float("-inf"), "right": float("-inf")}
         self._pinky_action_armed = {"left": True, "right": True}
 
     def update(self, hand_data: HandData, now: Optional[float] = None) -> GestureFrame:
@@ -118,9 +118,12 @@ class GestureInterpreter:
             self._pinky_action_armed[hand_label] = True
             return False
 
-        if not self._pinky_action_armed[hand_label] or now - self._last_pinky_action_time < SCENE_TURN_COOLDOWN_SECONDS:
+        if (
+            not self._pinky_action_armed[hand_label]
+            or now - self._last_pinky_action_time[hand_label] < SCENE_TURN_COOLDOWN_SECONDS
+        ):
             return False
 
         self._pinky_action_armed[hand_label] = False
-        self._last_pinky_action_time = now
+        self._last_pinky_action_time[hand_label] = now
         return True

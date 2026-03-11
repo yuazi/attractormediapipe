@@ -14,19 +14,10 @@ from config import (
     CAPTION,
     DEFAULT_POINT_SIZE,
     FPS,
-    HELP_LINES,
-    HUD_BAR_BG,
-    HUD_BAR_FILL,
-    HUD_HELP_TEXT,
-    HUD_MUTED,
-    HUD_PANEL_BORDER,
-    HUD_PANEL_COLOR,
-    HUD_TEXT,
     LUMINOSITY_RANGE,
     MAX_TRAIL,
     MIN_TRAIL,
     PIP_H,
-    PIP_MARGIN,
     PIP_W,
     SCALE_RANGE,
     SPEED_RANGE,
@@ -149,6 +140,53 @@ CONTROL_SLIDERS = (
 )
 RESET_TRAIL_ACTION = "reset_trail"
 
+HUD_RED = (230, 57, 70)
+HUD_RED_DIM = (230, 57, 70)
+HUD_GOLD = (244, 162, 97)
+HUD_WHITE = (241, 239, 234)
+HUD_WHITE_DIM = (241, 239, 234)
+HUD_PANEL_BG = (8, 6, 10)
+HUD_GESTURE_OK = (82, 183, 136)
+HUD_GESTURE_IDLE = (118, 124, 136)
+HUD_SCALE = 1.18
+
+HUD_SHORTCUTS = (
+    ("1-9", "Switch attractor"),
+    ("R", "Reset trail"),
+    ("SPACE", "Pause or resume"),
+    ("S", "Export 4K snapshot"),
+    ("WHEEL", "Zoom"),
+    ("L PINCH", "Speed"),
+    ("L RING", "Luminosity"),
+    ("R PALM", "Yaw and pitch"),
+    ("R PINCH", "Scale"),
+    ("R RING", "Trail length"),
+    ("R PINKY", "Switch study"),
+)
+
+HUD_THEMES: dict[str, dict[str, object]] = {
+    "Lorenz": {"accent": (230, 57, 70), "label": "Lorenz"},
+    "Rossler": {"accent": (244, 162, 97), "label": "Rössler"},
+    "Halvorsen": {"accent": (82, 183, 136), "label": "Halvorsen"},
+    "Dadras": {"accent": (76, 201, 240), "label": "Dadras"},
+    "Chen": {"accent": (199, 125, 255), "label": "Chen"},
+    "Aizawa": {"accent": (255, 209, 102), "label": "Aizawa"},
+    "Thomas": {"accent": (255, 107, 157), "label": "Thomas"},
+    "Sprott B": {"accent": (6, 214, 160), "label": "Sprott"},
+    "Langford": {"accent": (17, 138, 178), "label": "Langford"},
+}
+
+
+@dataclass(frozen=True)
+class HUDLayout:
+    nav_rows: tuple[tuple[int, int, int, int], ...]
+    params_panel: tuple[int, int, int, int]
+    slider_tracks: dict[str, tuple[int, int, int, int]]
+    reset_button: tuple[int, int, int, int]
+    shortcuts_panel: tuple[int, int, int, int]
+    shortcuts_toggle: tuple[int, int, int, int]
+    pip_rect: tuple[int, int, int, int]
+
 
 @dataclass
 class SceneState:
@@ -178,9 +216,15 @@ class SceneState:
     exporting: bool
     export_message: str
     show_overlay: bool
+    show_shortcuts: bool
     show_camera: bool
     focus_mode: bool
     active_slider: Optional[str]
+    hover_slider: Optional[str]
+    hover_nav_index: Optional[int]
+    hover_reset: bool
+    hover_shortcuts_toggle: bool
+    hover_pip: bool
     left_detected: bool
     right_detected: bool
     pip_frame: Optional[np.ndarray]
@@ -201,6 +245,7 @@ class SceneRenderer:
         self._point_capacity = 16
         self._overlay_size = (width, height)
         self._cv2 = None
+        self._hud_scale = HUD_SCALE
 
         pygame.init()
         pygame.display.set_caption(CAPTION)
@@ -241,31 +286,39 @@ class SceneRenderer:
         self.overlay_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self.camera_texture = self.ctx.texture((PIP_W, PIP_H), 3)
         self.camera_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self._font_micro = self._load_font(13, "hud_micro")
-        self._font_ui = self._load_font(18, "hud_ui")
-        self._font_body = self._load_font(16, "hud_body")
-        self._font_body_bold = self._load_font(18, "hud_body_bold")
-        self._font_nav = self._load_font(25, "hud_nav")
-        self._font_title = self._load_font(40, "hud_title")
-        self._font_equation = self._load_font(13, "hud_equation")
+        self._font_mono_7 = self._load_font(self._s(7), "hud_mono")
+        self._font_mono_8 = self._load_font(self._s(8), "hud_mono")
+        self._font_mono_9 = self._load_font(self._s(9), "hud_mono")
+        self._font_mono_10 = self._load_font(self._s(10), "hud_mono")
+        self._font_mono_11 = self._load_font(self._s(11), "hud_mono")
+        self._font_mono_18 = self._load_font(self._s(18), "hud_mono")
+        self._font_body_9 = self._load_font(self._s(9), "hud_body")
+        self._font_body_10 = self._load_font(self._s(10), "hud_body")
+        self._font_body_11 = self._load_font(self._s(11), "hud_body")
+        self._font_body_11_medium = self._load_font(self._s(11), "hud_body_medium")
+        self._font_body_13 = self._load_font(self._s(13), "hud_body_medium")
+        self._font_display_13 = self._load_font(self._s(13), "hud_display")
+        self._font_display_32 = self._load_font(self._s(32), "hud_display")
         self.clock = pygame.time.Clock()
+        self._shortcuts_progress = 1.0
+        self._live_axis = 0
+        self._last_state_name: str | None = None
+        self._last_state_vector: tuple[float, float, float] | None = None
+        self._fps_history: list[float] = [30.0] * 5
+        self._atmosphere_cache: dict[tuple[int, int, tuple[int, int, int]], bytes] = {}
+        self._vignette_cache: dict[tuple[int, int], Image.Image] = {}
+        self._scanlines_cache: dict[tuple[int, int], Image.Image] = {}
 
     def _load_font(self, size: int, style: str):
         families = {
-            "hud_micro": [
+            "hud_mono": [
                 os.path.join(FONT_DIR, "Onest-Medium.ttf"),
+                os.path.join(FONT_DIR, "Onest-Regular.ttf"),
                 os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
+                "~/Library/Fonts/Onest-Medium.ttf",
+                "~/Library/Fonts/Onest-Regular.ttf",
+                "~/Library/Fonts/PlusJakartaSans-VariableFont_wght.ttf",
                 "~/Library/Fonts/neuehaasgrottext-55roman-trial.otf",
-                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
-                "/Library/Fonts/Arial.ttf",
-                "DejaVuSans.ttf",
-            ],
-            "hud_ui": [
-                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
-                os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
-                "~/Library/Fonts/neuehaasgrottext-65medium-trial.otf",
-                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
-                "/Library/Fonts/Arial.ttf",
                 "DejaVuSans.ttf",
             ],
             "hud_body": [
@@ -276,7 +329,7 @@ class SceneRenderer:
                 "/System/Library/Fonts/Supplemental/Helvetica.ttc",
                 "DejaVuSans.ttf",
             ],
-            "hud_body_bold": [
+            "hud_body_medium": [
                 os.path.join(FONT_DIR, "Onest-SemiBold.ttf"),
                 os.path.join(FONT_DIR, "Onest-Medium.ttf"),
                 os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
@@ -286,28 +339,12 @@ class SceneRenderer:
                 "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                 "DejaVuSans-Bold.ttf",
             ],
-            "hud_nav": [
+            "hud_display": [
                 os.path.join(FONT_DIR, "BebasNeue-Regular.ttf"),
                 "~/Library/Fonts/BebasNeue-Regular.ttf",
                 "~/Library/Fonts/neuehaasgrotdisp-65medium-trial.otf",
                 "/System/Library/Fonts/Supplemental/Impact.ttf",
                 "DejaVuSans-Bold.ttf",
-            ],
-            "hud_title": [
-                os.path.join(FONT_DIR, "BebasNeue-Regular.ttf"),
-                "~/Library/Fonts/BebasNeue-Regular.ttf",
-                "~/Library/Fonts/neuehaasgrotdisp-75bold-trial.otf",
-                "/System/Library/Fonts/Supplemental/Impact.ttf",
-                "DejaVuSans-Bold.ttf",
-            ],
-            "hud_equation": [
-                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
-                os.path.join(FONT_DIR, "Onest-Regular.ttf"),
-                "~/Library/Fonts/Onest-Medium.ttf",
-                "~/Library/Fonts/Onest-Regular.ttf",
-                "~/Library/Fonts/neuehaasgrottext-55roman-trial.otf",
-                "DejaVuSansMono.ttf",
-                "DejaVuSans.ttf",
             ],
         }
         for candidate in families.get(style, families["hud_body"]):
@@ -319,6 +356,9 @@ class SceneRenderer:
             except OSError:
                 continue
         return ImageFont.load_default()
+
+    def _s(self, value: float, *, minimum: int = 1) -> int:
+        return max(minimum, int(round(value * self._hud_scale)))
 
     def _sync_window_size(self) -> None:
         width, height = pygame.display.get_window_size()
@@ -351,8 +391,15 @@ class SceneRenderer:
 
     def draw(self, state: SceneState) -> None:
         self._sync_window_size()
+        accent = self._hud_accent(state.attractor_name, state.attractor_color)
+        layout = self._hud_layout(state.attractor_names)
         background = tuple(channel / 255.0 for channel in BACKGROUND_COLOR)
         self.ctx.clear(background[0], background[1], background[2], 1.0)
+        self._render_atmosphere(accent)
+
+        if state.fps > 0.0:
+            self._fps_history.append(state.fps)
+            self._fps_history = self._fps_history[-5:]
 
         if len(state.positions) > 0:
             vertex_data = np.empty((len(state.positions), 4), dtype=np.float32)
@@ -376,127 +423,330 @@ class SceneRenderer:
             self.ctx.blend_func = self.moderngl.ONE, self.moderngl.ONE
             self.point_vao.render(mode=self.moderngl.POINTS, vertices=len(state.positions))
 
-        if state.show_overlay and not state.focus_mode:
-            self._draw_overlay(state)
-        if (state.show_camera or state.focus_mode) and state.pip_frame is not None:
+        if state.show_overlay and not state.focus_mode and state.show_camera and state.pip_frame is not None:
             self._draw_camera_frame(
                 state.pip_frame,
                 state.left_landmarks,
                 state.right_landmarks,
                 state.left_pip_caption,
                 state.right_pip_caption,
+                rect=layout.pip_rect,
+                opacity=0.94,
+            )
+        if state.show_overlay and not state.focus_mode:
+            self._draw_overlay(state, layout, accent)
+        elif (state.show_camera or state.focus_mode) and state.pip_frame is not None:
+            self._draw_camera_frame(
+                state.pip_frame,
+                state.left_landmarks,
+                state.right_landmarks,
+                state.left_pip_caption,
+                state.right_pip_caption,
+                rect=layout.pip_rect,
             )
 
-    def _draw_overlay(self, state: SceneState) -> None:
+    def _render_atmosphere(self, accent: tuple[int, int, int]) -> None:
+        cache_key = (self.width, self.height, accent)
+        pixels = self._atmosphere_cache.get(cache_key)
+        if pixels is None:
+            y = np.linspace(-1.0, 1.0, self.height, dtype=np.float32)[:, None]
+            x = np.linspace(-1.0, 1.0, self.width, dtype=np.float32)[None, :]
+            center_glow = np.exp(-(((x * 1.12) ** 2) + ((y * 0.98) ** 2)) * 3.8)
+            shoulder_glow = np.exp(-((((x - 0.18) * 1.9) ** 2) + (((y + 0.12) * 1.6) ** 2)) * 4.8)
+            gold_glow = np.exp(-((((x + 0.07) * 1.65) ** 2) + (((y - 0.04) * 1.45) ** 2)) * 7.2)
+            rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+            rgba[:, :, 0] = accent[0]
+            rgba[:, :, 1] = accent[1]
+            rgba[:, :, 2] = accent[2]
+            alpha = np.clip(center_glow * 28.0 + shoulder_glow * 16.0, 0.0, 48.0)
+            rgba[:, :, 3] = alpha.astype(np.uint8)
+
+            gold_layer = np.zeros_like(rgba)
+            gold_layer[:, :, 0] = HUD_GOLD[0]
+            gold_layer[:, :, 1] = HUD_GOLD[1]
+            gold_layer[:, :, 2] = HUD_GOLD[2]
+            gold_layer[:, :, 3] = np.clip(gold_glow * 12.0, 0.0, 18.0).astype(np.uint8)
+            combined = np.maximum(rgba, gold_layer)
+            pixels = combined.tobytes()
+            self._atmosphere_cache[cache_key] = pixels
+
+        self.overlay_texture.write(pixels)
+        self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height))
+
+    def _draw_overlay(self, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
         image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        accent = tuple(state.attractor_color)
-        self._draw_coordinates(draw, state)
-        self._draw_helper_panel(draw, state, accent)
-        self._draw_navigation(draw, state, accent)
-        self._draw_control_panel(draw, state, accent)
-        self._draw_placard(draw, state, accent)
-        self._draw_footer(draw, state)
+        target_progress = 1.0 if state.show_shortcuts else 0.0
+        self._shortcuts_progress += (target_progress - self._shortcuts_progress) * 0.24
+        if abs(target_progress - self._shortcuts_progress) < 0.01:
+            self._shortcuts_progress = target_progress
+
+        self._update_live_axis(state)
+        self._draw_coordinates(draw, state, accent)
+        self._draw_title_bar(draw, accent)
+        self._draw_navigation(draw, state, layout, accent)
+        self._draw_shortcuts_panel(draw, state, layout, accent)
+        self._draw_params_panel(draw, state, layout, accent)
+        self._draw_study_info(draw, state, accent)
+        self._draw_status_bar(draw, state, accent)
+        self._draw_pip_panel(draw, state, layout, accent)
+        image.alpha_composite(self._scanline_layer())
+        image.alpha_composite(self._vignette_layer())
+        draw = ImageDraw.Draw(image)
+        self._draw_corner_fiducials(draw)
         image = image.transpose(Image.FLIP_TOP_BOTTOM)
         self.overlay_texture.write(image.tobytes())
         self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height))
 
-    def _draw_coordinates(self, draw: ImageDraw.ImageDraw, state: SceneState) -> None:
-        labels = ("x", "y", "z")
-        x = 48
-        y = 30
-        gap = 90
-        for idx, label in enumerate(labels):
-            draw.text((x, y), label.upper(), font=self._font_micro, fill=HUD_MUTED)
-            value = f"{state.attractor_state[idx]:>7.3f}"
-            draw.text((x + 22, y + 12), value, font=self._font_ui, fill=HUD_TEXT)
+    def _update_live_axis(self, state: SceneState) -> None:
+        if self._last_state_name != state.attractor_name or self._last_state_vector is None:
+            self._live_axis = int(np.argmax(np.abs(np.asarray(state.attractor_state, dtype=np.float32))))
+        else:
+            deltas = [
+                abs(float(state.attractor_state[index]) - float(self._last_state_vector[index]))
+                for index in range(3)
+            ]
+            if max(deltas) > 1e-5:
+                self._live_axis = int(np.argmax(deltas))
+        self._last_state_name = state.attractor_name
+        self._last_state_vector = tuple(float(value) for value in state.attractor_state)
+
+    def _hud_layout(self, attractor_names: Sequence[str]) -> HUDLayout:
+        s = self._s
+        pad_x = s(28)
+        pad_top = s(28)
+        pad_bottom = s(24)
+        usable_width = self.width - pad_x * 2
+        usable_height = self.height - pad_top - pad_bottom
+        col_width = usable_width / 3.0
+        row_height = usable_height / 3.0
+
+        nav_rows: list[tuple[int, int, int, int]] = []
+        nav_right = self.width - pad_x
+        nav_top = pad_top + s(24)
+        nav_spacing = s(22)
+        for index, name in enumerate(attractor_names):
+            label = self._hud_label(name)
+            row_width = s(38) + self._text_width(label, self._font_mono_10) + s(28)
+            row_left = nav_right - row_width
+            row_top = nav_top + index * nav_spacing
+            nav_rows.append((row_left, row_top, nav_right, row_top + s(18)))
+
+        params_width = max(s(236), min(s(258), int(col_width) - s(12)))
+        params_height = s(278)
+        params_left = self.width - pad_x - params_width
+        params_top = int(pad_top + row_height + max(s(12), (row_height - params_height) / 2.0))
+        slider_tracks: dict[str, tuple[int, int, int, int]] = {}
+        row_top = params_top + s(46)
+        for slider_id, _value_range in CONTROL_SLIDERS:
+            slider_tracks[slider_id] = (
+                params_left + s(18),
+                row_top + s(22),
+                params_left + params_width - s(18),
+                row_top + s(28),
+            )
+            row_top += s(48)
+        reset_button = (
+            params_left + s(18),
+            params_top + params_height - s(42),
+            params_left + params_width - s(18),
+            params_top + params_height - s(12),
+        )
+
+        shortcuts_width = max(s(252), min(s(282), int(col_width) - s(10)))
+        shortcuts_height = s(232)
+        shortcuts_left = pad_x
+        shortcuts_top = int(pad_top + row_height + max(s(16), (row_height - shortcuts_height) / 2.0))
+        shortcuts_panel = (shortcuts_left, shortcuts_top, shortcuts_left + shortcuts_width, shortcuts_top + shortcuts_height)
+        shortcuts_toggle = (shortcuts_panel[2] - s(62), shortcuts_top + s(8), shortcuts_panel[2] - s(10), shortcuts_top + s(24))
+
+        pip_rect = (self.width - pad_x - PIP_W, self.height - pad_bottom - PIP_H, self.width - pad_x, self.height - pad_bottom)
+        return HUDLayout(
+            nav_rows=tuple(nav_rows),
+            params_panel=(params_left, params_top, params_left + params_width, params_top + params_height),
+            slider_tracks=slider_tracks,
+            reset_button=reset_button,
+            shortcuts_panel=shortcuts_panel,
+            shortcuts_toggle=shortcuts_toggle,
+            pip_rect=pip_rect,
+        )
+
+    def _hud_accent(self, attractor_name: str, fallback: tuple[int, int, int]) -> tuple[int, int, int]:
+        theme = HUD_THEMES.get(attractor_name, {})
+        return tuple(theme.get("accent", fallback))  # type: ignore[arg-type]
+
+    def _hud_label(self, attractor_name: str) -> str:
+        theme = HUD_THEMES.get(attractor_name, {})
+        return str(theme.get("label", attractor_name))
+
+    def _draw_coordinates(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        x = s(28)
+        y = s(28)
+        draw.text((x, y), "CURRENT POSITION", font=self._font_mono_8, fill=self._rgba(accent, 255))
+        axis_y = y + s(16)
+        value_y = axis_y + s(12)
+        gap = s(82)
+        blink_on = int(state.time_value / 0.55) % 2 == 0
+        for index, axis in enumerate(("X", "Y", "Z")):
+            axis_color = self._rgba(accent, 240 if index == self._live_axis else 140)
+            draw.text((x, axis_y), axis, font=self._font_mono_8, fill=axis_color)
+            value = self._format_coordinate(state.attractor_state[index])
+            draw.text((x, value_y), value, font=self._font_mono_18, fill=self._rgba(HUD_WHITE, 255))
+            if index == self._live_axis and blink_on:
+                caret_x = x + self._text_width(value, self._font_mono_18) + s(2)
+                draw.text((caret_x, value_y - s(1)), "|", font=self._font_mono_18, fill=self._rgba(accent, 255))
             x += gap
 
-    def _draw_navigation(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
-        x, y, spacing, _ = self._navigation_metrics(state)
-        for idx, _name in enumerate(state.attractor_names):
-            label = f"FIGURE {idx + 1}"
-            color = accent if idx == state.attractor_index else HUD_MUTED
-            draw.text((x, y + idx * spacing), label, font=self._font_nav, fill=color)
+    def _draw_title_bar(self, draw: ImageDraw.ImageDraw, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        app_label = "(y)us"
+        title = "PARTICLE ATTRACTOR"
+        app_width = self._text_width(app_label, self._font_mono_8)
+        title_width = self._text_width(title, self._font_display_13)
+        center_x = self.width // 2
+        top = s(28)
+        draw.text((center_x - app_width // 2, top), app_label, font=self._font_mono_8, fill=self._rgba(accent, 76))
+        draw.text((center_x - title_width // 2, top + s(12)), title, font=self._font_display_13, fill=self._rgba(accent, 148))
 
-    def _navigation_metrics(self, state: SceneState) -> tuple[int, int, int, int]:
-        labels = [f"FIGURE {idx + 1}" for idx in range(len(state.attractor_names))]
-        max_width = max(self._text_width(label, self._font_nav) for label in labels)
-        x = self.width - 54 - max_width
-        y = 58
-        spacing = 28
-        return x, y, spacing, max_width
+    def _draw_navigation(self, draw: ImageDraw.ImageDraw, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        header = "STUDIES"
+        header_width = self._text_width(header, self._font_mono_8)
+        draw.text((self.width - s(28) - header_width, s(28)), header, font=self._font_mono_8, fill=self._rgba(accent, 196))
 
-    def _draw_control_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
-        panel_rect, track_rects, button_rect = self._control_panel_layout(state.attractor_names)
-        panel_x, panel_y, panel_right, panel_bottom = panel_rect
-        panel_width = panel_right - panel_x
-        panel_height = panel_bottom - panel_y
-        fill = (*HUD_PANEL_COLOR[:3], 232)
-        border = (*HUD_PANEL_BORDER, 255)
-        draw.rounded_rectangle((panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), radius=18, fill=fill, outline=border, width=1)
-        draw.text((panel_x + 18, panel_y + 12), "Parameters", font=self._font_body_bold, fill=HUD_TEXT)
+        for index, (name, row_rect) in enumerate(zip(state.attractor_names, layout.nav_rows)):
+            left, top, right, bottom = row_rect
+            active = index == state.attractor_index
+            hovered = index == state.hover_nav_index
+            accent = self._hud_accent(name, state.attractor_color)
+            label = self._hud_label(name)
+            if active:
+                draw.rounded_rectangle((left, top, right, bottom), radius=s(5), fill=self._rgba(accent, 34))
+                draw.line((left, top, left, bottom), fill=self._rgba(accent, 255), width=max(1, s(2)))
+            elif hovered:
+                draw.rounded_rectangle((left, top, right, bottom), radius=s(5), fill=self._rgba(accent, 18))
+
+            stripe_alpha = 255 if active or hovered else 90
+            draw.rounded_rectangle((left + s(8), top + s(4), left + s(10), top + s(14)), radius=s(1), fill=self._rgba(accent, stripe_alpha))
+            num = f"{index + 1:02d}"
+            draw.text((left + s(18), top + s(3)), num, font=self._font_mono_8, fill=self._rgba(accent if active or hovered else HUD_WHITE, 255 if active or hovered else 72))
+            label_width = self._text_width(label, self._font_mono_10)
+            label_x = right - s(20) - label_width
+            label_fill = self._rgba(HUD_WHITE, 255 if active or hovered else 120)
+            draw.text((label_x, top + s(1)), label, font=self._font_mono_10, fill=label_fill)
+
+            dot_center_x = right - s(8)
+            dot_center_y = top + s(9)
+            if active:
+                self._draw_dot(draw, (dot_center_x, dot_center_y), max(2, s(2)), accent, glow=s(10))
+            elif hovered:
+                self._draw_dot(draw, (dot_center_x, dot_center_y), max(2, s(2)), accent, glow=s(5), alpha=140)
+
+    def _draw_shortcuts_panel(
+        self,
+        draw: ImageDraw.ImageDraw,
+        state: SceneState,
+        layout: HUDLayout,
+        accent: tuple[int, int, int],
+    ) -> None:
+        s = self._s
+        left, top, right, bottom = layout.shortcuts_panel
+        header_height = s(34)
+        full_height = bottom - top
+        current_height = header_height + int((full_height - header_height) * self._shortcuts_progress)
+        panel_bottom = top + current_height
+
+        draw.rounded_rectangle((left, top, right, panel_bottom), radius=s(14), fill=self._rgba(HUD_PANEL_BG, 198), outline=self._rgba(accent, 40), width=1)
+        draw.line((left, top + 1, left, panel_bottom - 1), fill=self._rgba(accent, 255), width=max(1, s(2)))
+        draw.text((left + s(14), top + s(10)), "SHORTCUTS", font=self._font_mono_8, fill=self._rgba(accent, 255))
+
+        toggle_label = "[H] HIDE" if state.show_shortcuts else "[H] SHOW"
+        toggle_left, toggle_top, toggle_right, toggle_bottom = layout.shortcuts_toggle
+        if state.hover_shortcuts_toggle:
+            draw.rounded_rectangle((toggle_left, toggle_top, toggle_right, toggle_bottom), radius=s(5), fill=self._rgba(accent, 18), outline=self._rgba(accent, 130), width=1)
+        else:
+            draw.rounded_rectangle((toggle_left, toggle_top, toggle_right, toggle_bottom), radius=s(5), fill=self._rgba(HUD_PANEL_BG, 0), outline=self._rgba(accent, 40), width=1)
+        toggle_width = self._text_width(toggle_label, self._font_mono_7)
+        draw.text((toggle_left + ((toggle_right - toggle_left - toggle_width) // 2), toggle_top + s(4)), toggle_label, font=self._font_mono_7, fill=self._rgba(accent, 148))
+
+        if self._shortcuts_progress <= 0.03:
+            return
+
+        clip_bottom = panel_bottom - s(10)
+        key_x = left + s(14)
+        cursor_y = top + s(40)
+        row_height = s(18)
+        row_alpha = max(0, min(255, int(255 * self._shortcuts_progress)))
+        chip_widths = [max(s(28), self._text_width(key, self._font_mono_8) + s(12)) for key, _ in HUD_SHORTCUTS]
+        chip_col_width = max(chip_widths, default=s(28))
+        desc_x = key_x + chip_col_width + s(14)
+        desc_width = max(s(80), right - s(16) - desc_x)
+        for key, description in HUD_SHORTCUTS:
+            if cursor_y + s(10) > clip_bottom:
+                break
+            chip_width = max(s(28), self._text_width(key, self._font_mono_8) + s(12))
+            chip_left = key_x + max(0, (chip_col_width - chip_width) // 2)
+            draw.rounded_rectangle(
+                (chip_left, cursor_y - s(1), chip_left + chip_width, cursor_y + s(10)),
+                radius=s(4),
+                fill=self._rgba(HUD_WHITE, 12),
+                outline=self._rgba(accent, 40),
+                width=1,
+            )
+            draw.text((chip_left + s(6), cursor_y), key, font=self._font_mono_8, fill=self._rgba(HUD_WHITE, row_alpha))
+            description_lines = self._wrap_text_pixels(description, desc_width, self._font_body_10)
+            for line_index, line in enumerate(description_lines[:2]):
+                line_y = cursor_y + line_index * s(9)
+                if line_y + s(8) > clip_bottom:
+                    break
+                draw.text((desc_x, line_y), line, font=self._font_body_10, fill=self._rgba(HUD_WHITE, min(row_alpha, 152)))
+            cursor_y += row_height
+
+    def _draw_params_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        left, top, right, bottom = layout.params_panel
+        draw.rounded_rectangle((left, top, right, bottom), radius=s(14), fill=self._rgba(HUD_PANEL_BG, 199), outline=self._rgba(accent, 40), width=1)
+        draw.line((left + 1, top, right - 1, top), fill=self._rgba(accent, 255), width=1)
+        draw.text((left + s(18), top + s(12)), "PARAMETERS", font=self._font_mono_9, fill=self._rgba(accent, 188))
+
+        live_label = "EXPORT" if state.exporting else "PAUSED" if state.paused else "LIVE"
+        live_x = right - s(76)
+        live_y = top + s(12)
+        self._draw_dot(draw, (live_x, live_y + s(5)), max(2, s(2)), accent, glow=s(8))
+        draw.text((live_x + s(8), live_y + s(1)), live_label, font=self._font_mono_8, fill=self._rgba(accent, 240))
 
         rows = {
-            "speed": ("Speed", state.speed, SPEED_RANGE),
-            "trail_len": ("Trail length", float(state.trail_len), (float(MIN_TRAIL), float(MAX_TRAIL))),
-            "luminosity": ("Luminosity", state.luminosity, LUMINOSITY_RANGE),
-            "scale": ("Scale", state.zoom, SCALE_RANGE),
+            "speed": ("Speed", state.speed, SPEED_RANGE, accent),
+            "trail_len": ("Trail length", float(state.trail_len), (float(MIN_TRAIL), float(MAX_TRAIL)), accent),
+            "luminosity": ("Luminosity", state.luminosity, LUMINOSITY_RANGE, accent),
+            "scale": ("Scale", state.zoom, SCALE_RANGE, accent),
         }
-        for slider_id, (_value_range) in CONTROL_SLIDERS:
-            label, value, value_range = rows[slider_id]
-            track_left, track_top, track_right, _track_bottom = track_rects[slider_id]
+        for slider_id, _value_range in CONTROL_SLIDERS:
+            label, value, value_range, fill_color = rows[slider_id]
+            track_left, track_top, track_right, _track_bottom = layout.slider_tracks[slider_id]
             self._draw_slider_row(
                 draw,
                 track_left,
-                track_top - 20,
+                track_top - s(20),
                 track_right - track_left,
                 label,
                 float(value),
                 value_range,
-                accent,
-                active=state.active_slider == slider_id,
+                fill_color,
+                active=state.active_slider == slider_id or state.hover_slider == slider_id,
             )
 
-        self._draw_action_button(draw, button_rect, "Reset trail", accent)
-        status = "paused" if state.paused else "exporting..." if state.exporting else state.export_message or "live"
-        status_fill = accent if not state.paused else HUD_BAR_FILL
-        draw.text((panel_x + 18, panel_y + panel_height - 24), status.upper(), font=self._font_micro, fill=status_fill)
-
-    def _draw_helper_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
-        panel_x = 44
-        panel_y = 104
-        panel_width = 270
-        help_lines = [
-            "Overlay helper",
-            "1-9 switch attractors",
-            "R reset current trail",
-            "SPACE pause or resume",
-            "S export 4K snapshot",
-            "Mouse wheel controls zoom",
-            "Left hand controls speed, glow, reset",
-            "Right hand controls yaw, pitch, zoom",
-            "Right ring pinch sets trail length",
-            "Right pinky touch switches scene",
-        ]
-        line_height = 20
-        panel_height = 28 + len(help_lines) * line_height + 14
-        fill = (*HUD_PANEL_COLOR[:3], 220)
-        border = (*HUD_PANEL_BORDER, 255)
-        draw.rounded_rectangle(
-            (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height),
-            radius=16,
-            fill=fill,
-            outline=border,
-            width=1,
-        )
-        cursor_y = panel_y + 14
-        for idx, line in enumerate(help_lines):
-            if idx == 0:
-                draw.text((panel_x + 16, cursor_y), line, font=self._font_body_bold, fill=accent)
-            else:
-                draw.text((panel_x + 16, cursor_y), line, font=self._font_body, fill=HUD_HELP_TEXT)
-            cursor_y += line_height
+        divider_y = layout.reset_button[1] - s(10)
+        draw.line((left + s(18), divider_y, right - s(18), divider_y), fill=self._rgba(accent, 22), width=1)
+        button_left, button_top, button_right, button_bottom = layout.reset_button
+        if state.hover_reset:
+            draw.rounded_rectangle((button_left, button_top, button_right, button_bottom), radius=s(10), fill=self._rgba(accent, 24), outline=self._rgba(accent, 200), width=1)
+        else:
+            draw.rounded_rectangle((button_left, button_top, button_right, button_bottom), radius=s(10), fill=self._rgba(HUD_PANEL_BG, 0), outline=self._rgba(accent, 140), width=1)
+        button_label = "RESET TRAIL"
+        button_width = self._text_width(button_label, self._font_mono_9)
+        draw.text((button_left + ((button_right - button_left - button_width) // 2), button_top + s(9)), button_label, font=self._font_mono_9, fill=self._rgba(accent if not state.hover_reset else HUD_WHITE, 255))
 
     def _draw_slider_row(
         self,
@@ -507,85 +757,202 @@ class SceneRenderer:
         label: str,
         value: float,
         value_range: tuple[float, float],
-        accent: tuple[int, int, int],
+        fill_color: tuple[int, int, int],
         *,
         active: bool,
     ) -> None:
+        s = self._s
         minimum, maximum = value_range
         ratio = 0.0 if maximum <= minimum else max(0.0, min(1.0, (value - minimum) / (maximum - minimum)))
-        label_y = y
-        track_y = y + 22
-        value_text = f"{value:0.2f}" if label != "Trail length" else f"{int(round(value))}"
-        draw.text((x, label_y), label, font=self._font_body, fill=HUD_TEXT)
-        value_w = self._text_width(value_text, self._font_micro)
-        draw.text((x + width - value_w, label_y + 2), value_text, font=self._font_micro, fill=HUD_BAR_FILL)
-        draw.line((x, track_y, x + width, track_y), fill=HUD_BAR_BG, width=3)
+        track_y = y + s(24)
+        value_text = f"{int(round(value)):,}" if label == "Trail length" else f"{value:0.2f}"
+        draw.text((x, y), label.upper(), font=self._font_mono_8, fill=self._rgba(HUD_WHITE, 140))
+        value_width = self._text_width(value_text, self._font_mono_11)
+        draw.text((x + width - value_width, y - s(1)), value_text, font=self._font_mono_11, fill=self._rgba(HUD_WHITE, 255))
+        draw.line((x, track_y, x + width, track_y), fill=self._rgba(HUD_WHITE, 22), width=max(1, s(2)))
         fill_end = x + int(width * ratio)
         if fill_end > x:
-            draw.line((x, track_y, fill_end, track_y), fill=accent, width=3)
-        knob_radius = 6 if active else 5
-        knob_fill = accent if active else HUD_BAR_FILL
-        draw.ellipse((fill_end - knob_radius, track_y - knob_radius, fill_end + knob_radius, track_y + knob_radius), fill=knob_fill)
+            draw.line((x, track_y, fill_end, track_y), fill=self._rgba(fill_color, 255), width=max(1, s(2)))
+        thumb_radius = s(5)
+        if active:
+            self._draw_dot(draw, (fill_end, track_y), thumb_radius, HUD_WHITE, glow=s(14), alpha=255)
+        else:
+            draw.ellipse((fill_end - thumb_radius, track_y - thumb_radius, fill_end + thumb_radius, track_y + thumb_radius), fill=self._rgba(HUD_WHITE, 235))
 
-    def _draw_action_button(
-        self,
-        draw: ImageDraw.ImageDraw,
-        rect: tuple[int, int, int, int],
-        label: str,
-        accent: tuple[int, int, int],
-    ) -> None:
-        left, top, right, bottom = rect
-        fill = (*HUD_BAR_BG, 255)
-        border = (*accent, 255)
-        draw.rounded_rectangle((left, top, right, bottom), radius=12, fill=fill, outline=border, width=1)
-        label_w = self._text_width(label, self._font_body_bold)
-        label_h = self._text_height(label, self._font_body_bold)
-        label_x = left + max(0, (right - left - label_w) // 2)
-        label_y = top + max(0, (bottom - top - label_h) // 2) - 1
-        draw.text((label_x, label_y), label, font=self._font_body_bold, fill=HUD_TEXT)
+    def _draw_study_info(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        left = s(28)
+        placard_width = s(360)
+        title_lines = self._study_title_lines(state.placard_title)
+        rows = list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")]
+        row_label_width = max((self._text_width(label.upper(), self._font_mono_8) for label, _ in rows), default=0)
+        row_value_width = max((self._text_width(value, self._font_mono_8) for _, value in rows), default=0)
+        column_gap = s(24)
+        stats_gap = s(16)
+        stats_width = max(s(120), row_label_width + stats_gap + row_value_width)
+        body_width = max(s(180), placard_width - column_gap - stats_width)
+        equation_lines = self._format_equation_lines(state.placard_equation, body_width)
+        description_lines = self._wrap_text_pixels(state.placard_medium, body_width, self._font_body_10)
+        title_height = len(title_lines) * s(28)
+        body_block_height = s(18) + len(equation_lines) * s(12) + s(8) + len(description_lines) * s(14)
+        stats_block_height = len(rows) * s(13)
+        content_height = s(18) + title_height + s(10) + max(body_block_height, stats_block_height)
+        top = self.height - s(24) - content_height
 
-    def _control_panel_layout(
-        self,
-        attractor_names: Sequence[str],
-    ) -> tuple[tuple[int, int, int, int], dict[str, tuple[int, int, int, int]], tuple[int, int, int, int]]:
-        labels = [f"FIGURE {idx + 1}" for idx in range(len(attractor_names))]
-        max_width = max(self._text_width(label, self._font_nav) for label in labels) if labels else 0
-        nav_x = self.width - 54 - max_width
-        panel_width = 310
-        panel_height = 262
-        panel_gap = 34
-        panel_x = max(48, nav_x - panel_gap - panel_width)
-        panel_y = 60
-        track_rects: dict[str, tuple[int, int, int, int]] = {}
-        row_y = panel_y + 46
-        for slider_id, _value_range in CONTROL_SLIDERS:
-            track_left = panel_x + 18
-            track_top = row_y + 20
-            track_right = panel_x + panel_width - 18
-            track_bottom = track_top + 10
-            track_rects[slider_id] = (track_left, track_top, track_right, track_bottom)
-            row_y += 42
-        button_rect = (panel_x + 18, panel_y + 204, panel_x + panel_width - 18, panel_y + 238)
-        return (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), track_rects, button_rect
+        draw.line((left, top, left + s(22), top), fill=self._rgba(accent, 160), width=1)
+        draw.text((left + s(32), top - s(4)), f"STUDY NO. {self._roman(state.attractor_index + 1)}", font=self._font_mono_8, fill=self._rgba(accent, 180))
+
+        cursor_y = top + s(12)
+        for line in title_lines:
+            draw.text((left, cursor_y), line, font=self._font_display_32, fill=self._rgba(accent, 255))
+            cursor_y += s(28)
+
+        body_top = cursor_y + s(2)
+        body_left = left
+        stats_left = left + body_width + column_gap
+
+        draw.text((body_left, body_top), state.placard_year, font=self._font_body_11, fill=self._rgba(HUD_WHITE, 118))
+        cursor_y = body_top + s(18)
+        for line in equation_lines:
+            draw.text((body_left, cursor_y), line, font=self._font_mono_9, fill=self._rgba(HUD_WHITE, 112))
+            cursor_y += s(12)
+        cursor_y += s(6)
+        for line in description_lines:
+            draw.text((body_left, cursor_y), line, font=self._font_body_10, fill=self._rgba(HUD_WHITE, 102))
+            cursor_y += s(14)
+
+        stats_y = body_top + s(1)
+        for label, value in rows:
+            draw.text((stats_left, stats_y), label.upper(), font=self._font_mono_8, fill=self._rgba(accent, 132))
+            value_width = self._text_width(value, self._font_mono_8)
+            draw.text((left + placard_width - value_width, stats_y), value, font=self._font_mono_8, fill=self._rgba(HUD_WHITE, 160))
+            stats_y += s(13)
+
+    def _draw_status_bar(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        bar_width = max(2, s(3))
+        gap = s(2)
+        heights: list[int] = []
+        for fps_value in self._fps_history[-5:]:
+            clamped = max(0.0, min(60.0, fps_value))
+            heights.append(s(5) + int((clamped / 60.0) * s(7)))
+        while len(heights) < 5:
+            heights.insert(0, s(6))
+
+        total_width = len(heights) * bar_width + (len(heights) - 1) * gap
+        base_x = self.width // 2 - s(70)
+        base_y = self.height - s(30)
+        for index, height in enumerate(heights):
+            x = base_x + index * (bar_width + gap)
+            y = base_y - height
+            draw.rounded_rectangle((x, y, x + bar_width, base_y), radius=s(1), fill=self._rgba(accent, 210 if index >= len(heights) - 3 else 132))
+
+        fps_label = f"{state.fps:0.1f} FPS"
+        draw.text((base_x + total_width + s(10), base_y - s(10)), fps_label, font=self._font_mono_10, fill=self._rgba(HUD_WHITE, 220))
+        status_text = f"{state.point_count:,} PTS"
+        if state.exporting:
+            status_text = "EXPORTING"
+        elif state.paused:
+            status_text = "PAUSED"
+        draw.text((base_x + total_width + s(78), base_y - s(10)), status_text, font=self._font_mono_8, fill=self._rgba(accent, 140))
+
+    def _draw_pip_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
+        s = self._s
+        left, top, right, bottom = layout.pip_rect
+        has_live_camera = state.show_camera and state.pip_frame is not None
+        border_color = self._rgba(accent, 88 if not state.hover_pip else 132)
+        overlay_alpha = 158 if not has_live_camera else 6
+        draw.rounded_rectangle((left, top, right, bottom), radius=s(8), fill=self._rgba(HUD_PANEL_BG, overlay_alpha), outline=border_color, width=1)
+        draw.line((left + 1, top, right - 1, top), fill=self._rgba(accent, 120 if not state.hover_pip else 160), width=1)
+
+        if not has_live_camera:
+            center_x = left + (right - left) * 0.42
+            center_y = top + (bottom - top) * 0.66
+            draw.ellipse((center_x - s(46), center_y - s(34), center_x + s(46), center_y + s(34)), fill=self._rgba(HUD_WHITE, 12))
+            draw.ellipse((center_x - s(24), center_y - s(18), center_x + s(24), center_y + s(18)), fill=self._rgba(accent, 10))
+
+        scanline_alpha = 6 if has_live_camera else 14
+        for scan_y in range(top + 1, bottom, s(3)):
+            draw.line((left + 1, scan_y, right - 1, scan_y), fill=self._rgba((0, 0, 0), scanline_alpha), width=1)
+
+        bracket_length = s(8)
+        bracket_alpha = 240
+        for start_x, start_y, dir_x, dir_y in (
+            (left, top, 1, 1),
+            (right, top, -1, 1),
+            (left, bottom, 1, -1),
+            (right, bottom, -1, -1),
+        ):
+            draw.line((start_x, start_y, start_x + bracket_length * dir_x, start_y), fill=self._rgba(accent, bracket_alpha), width=1)
+            draw.line((start_x, start_y, start_x, start_y + bracket_length * dir_y), fill=self._rgba(accent, bracket_alpha), width=1)
+
+        top_label = "CAM · 01"
+        draw.text((left + s(7), top + s(6)), top_label, font=self._font_mono_7, fill=self._rgba(HUD_WHITE, 92))
+        self._draw_dot(draw, (right - s(32), top + s(9)), max(2, s(2)), accent, glow=s(6))
+        draw.text((right - s(24), top + s(5)), "REC", font=self._font_mono_7, fill=self._rgba(accent, 255))
+
+        gesture_live = state.left_detected or state.right_detected
+        gesture_label = "GESTURE ACTIVE" if gesture_live else "GESTURE IDLE"
+        gesture_color = HUD_GESTURE_OK if gesture_live else HUD_GESTURE_IDLE
+        draw.text((left + s(7), bottom - s(12)), self._format_timestamp(state.time_value), font=self._font_mono_8, fill=self._rgba(HUD_WHITE, 92))
+        self._draw_dot(draw, (right - s(69), bottom - s(9)), max(2, s(2)), gesture_color, glow=s(6) if gesture_live else s(3), alpha=220 if gesture_live else 140)
+        draw.text((right - s(63), bottom - s(13)), gesture_label, font=self._font_mono_7, fill=self._rgba(gesture_color, 220 if gesture_live else 132))
+
+    def _draw_corner_fiducials(self, draw: ImageDraw.ImageDraw) -> None:
+        s = self._s
+        margin_x = s(22)
+        margin_top = s(22)
+        margin_bottom = s(18)
+        length = s(14)
+        current_accent = self._hud_accent(self._last_state_name or "Lorenz", HUD_RED)
+        color = self._rgba(current_accent, 160)
+        for x, y, dx, dy in (
+            (margin_x, margin_top, 1, 1),
+            (self.width - margin_x, margin_top, -1, 1),
+            (margin_x, self.height - margin_bottom, 1, -1),
+            (self.width - margin_x, self.height - margin_bottom, -1, -1),
+        ):
+            draw.line((x, y, x + length * dx, y), fill=color, width=1)
+            draw.line((x, y, x, y + length * dy), fill=color, width=1)
 
     def control_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> Optional[str]:
-        panel_rect, track_rects, _button_rect = self._control_panel_layout(attractor_names)
+        layout = self._hud_layout(attractor_names)
         x, y = position
-        if not (panel_rect[0] <= x <= panel_rect[2] and panel_rect[1] <= y <= panel_rect[3]):
+        panel_left, panel_top, panel_right, panel_bottom = layout.params_panel
+        if not (panel_left <= x <= panel_right and panel_top <= y <= panel_bottom):
             return None
-        for slider_id, (left, top, right, bottom) in track_rects.items():
-            if left <= x <= right and top - 16 <= y <= bottom + 8:
+        for slider_id, (left, top, right, bottom) in layout.slider_tracks.items():
+            if left <= x <= right and top - 16 <= y <= bottom + 10:
                 return slider_id
         return None
 
+    def navigation_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> Optional[int]:
+        layout = self._hud_layout(attractor_names)
+        for index, rect in enumerate(layout.nav_rows):
+            if self._contains(rect, position):
+                return index
+        return None
+
+    def shortcuts_toggle_hit_test(
+        self,
+        attractor_names: Sequence[str],
+        position: tuple[int, int],
+        show_shortcuts: bool,
+    ) -> bool:
+        layout = self._hud_layout(attractor_names)
+        return self._contains(layout.shortcuts_toggle, position)
+
+    def pip_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> bool:
+        layout = self._hud_layout(attractor_names)
+        return self._contains(layout.pip_rect, position)
+
     def reset_button_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> bool:
-        _panel_rect, _track_rects, button_rect = self._control_panel_layout(attractor_names)
-        x, y = position
-        return button_rect[0] <= x <= button_rect[2] and button_rect[1] <= y <= button_rect[3]
+        layout = self._hud_layout(attractor_names)
+        return self._contains(layout.reset_button, position)
 
     def control_value_for_position(self, attractor_names: Sequence[str], slider_id: str, x_position: int) -> float:
-        _panel_rect, track_rects, _button_rect = self._control_panel_layout(attractor_names)
-        left, _top, right, _bottom = track_rects[slider_id]
+        layout = self._hud_layout(attractor_names)
+        left, _top, right, _bottom = layout.slider_tracks[slider_id]
         minimum, maximum = dict(CONTROL_SLIDERS)[slider_id]
         ratio = 0.0 if right <= left else max(0.0, min(1.0, (x_position - left) / (right - left)))
         value = minimum + (maximum - minimum) * ratio
@@ -593,49 +960,30 @@ class SceneRenderer:
             return float(int(round(value / 100.0) * 100))
         return round(value, 2)
 
-    def _draw_placard(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
-        x = 48
-        placard_width = 295
-        equation_lines = self._wrap_lines(state.placard_equation, 34)
-        medium_lines = self._wrap_lines(state.placard_medium, 34)
-        row_count = len(list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")])
-        content_height = 18 + 28 + 42 + 22 + len(equation_lines) * 15 + 10 + len(medium_lines) * 18 + 10 + 12 + row_count * 16
-        y = self.height - content_height - 24
-        draw.line((x, y, x + 22, y), fill=HUD_BAR_FILL, width=1)
-        cursor_y = y + 18
-        draw.text((x, cursor_y), f"STUDY NO. {self._roman(state.attractor_index + 1)}", font=self._font_micro, fill=HUD_MUTED)
-        cursor_y += 28
-        draw.text((x, cursor_y), state.placard_title, font=self._font_title, fill=accent)
-        cursor_y += 42
-        draw.text((x, cursor_y), state.placard_year, font=self._font_body_bold, fill=HUD_MUTED)
-        cursor_y += 22
-        for line in equation_lines:
-            draw.text((x, cursor_y), line, font=self._font_equation, fill=HUD_TEXT)
-            cursor_y += 15
-        cursor_y += 10
-        for line in medium_lines:
-            draw.text((x, cursor_y), line, font=self._font_body, fill=HUD_HELP_TEXT)
-            cursor_y += 18
-        cursor_y += 10
-        draw.line((x, cursor_y, x + placard_width, cursor_y), fill=HUD_PANEL_BORDER, width=1)
-        cursor_y += 12
-        rows = list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")]
-        for label, value in rows:
-            draw.text((x, cursor_y), label.upper(), font=self._font_micro, fill=HUD_MUTED)
-            value_w = self._text_width(value, self._font_micro)
-            draw.text((x + placard_width - value_w, cursor_y), value, font=self._font_micro, fill=HUD_TEXT)
-            cursor_y += 16
-
-    def _draw_footer(self, draw: ImageDraw.ImageDraw, state: SceneState) -> None:
-        footer = f"{state.fps:>4.1f} FPS"
-        footer_w = self._text_width(footer, self._font_micro)
-        draw.text(((self.width - footer_w) // 2, self.height - 28), footer, font=self._font_micro, fill=HUD_MUTED)
-
     def _wrap_lines(self, text: str, width: int) -> list[str]:
         lines: list[str] = []
         for paragraph in text.splitlines() or [text]:
             wrapped = textwrap.wrap(paragraph, width=width) or [paragraph]
             lines.extend(wrapped)
+        return lines
+
+    def _wrap_text_pixels(self, text: str, max_width: int, font) -> list[str]:
+        lines: list[str] = []
+        for paragraph in text.splitlines() or [text]:
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+
+            current = words[0]
+            for word in words[1:]:
+                candidate = f"{current} {word}"
+                if self._text_width(candidate, font) <= max_width:
+                    current = candidate
+                else:
+                    lines.append(current)
+                    current = word
+            lines.append(current)
         return lines
 
     def _roman(self, value: int) -> str:
@@ -656,6 +1004,94 @@ class SceneRenderer:
         bbox = font.getbbox(text or " ")
         return max(1, bbox[3] - bbox[1] + 2)
 
+    def _rgba(self, color: tuple[int, int, int], alpha: int) -> tuple[int, int, int, int]:
+        return color[0], color[1], color[2], max(0, min(255, int(alpha)))
+
+    def _draw_dot(
+        self,
+        draw: ImageDraw.ImageDraw,
+        center: tuple[int, int],
+        radius: int,
+        color: tuple[int, int, int],
+        *,
+        glow: int = 0,
+        alpha: int = 255,
+    ) -> None:
+        x, y = center
+        if glow > 0:
+            glow_fill = self._rgba(color, max(24, min(96, alpha // 3)))
+            draw.ellipse((x - glow, y - glow, x + glow, y + glow), fill=glow_fill)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=self._rgba(color, alpha))
+
+    def _contains(self, rect: tuple[int, int, int, int], position: tuple[int, int]) -> bool:
+        left, top, right, bottom = rect
+        x, y = position
+        return left <= x <= right and top <= y <= bottom
+
+    def _format_coordinate(self, value: float) -> str:
+        return f"{value:>7.3f}".replace("-", "−")
+
+    def _study_title_lines(self, title: str) -> list[str]:
+        stripped = title.strip()
+        if stripped.lower().endswith(" attractor"):
+            return [stripped[:-10].upper(), "ATTRACTOR"]
+        return self._wrap_lines(stripped.upper(), 12)[:2]
+
+    def _format_equation_lines(self, equation: str, max_width: int) -> list[str]:
+        formatted = equation
+        for source, target in (
+            ("xdot", "ẋ"),
+            ("ydot", "ẏ"),
+            ("zdot", "ż"),
+            ("sigma", "σ"),
+            ("rho", "ρ"),
+            ("beta", "β"),
+            ("lambda", "λ"),
+            ("omega", "ω"),
+            ("alpha", "α"),
+            ("epsilon", "ε"),
+            ("*", "·"),
+        ):
+            formatted = formatted.replace(source, target)
+
+        lines: list[str] = []
+        for line in formatted.splitlines():
+            lines.extend(self._wrap_text_pixels(line, max_width, self._font_mono_9))
+        return lines
+
+    def _format_timestamp(self, seconds: float) -> str:
+        whole = max(0, int(seconds))
+        hours = whole // 3600
+        minutes = (whole % 3600) // 60
+        secs = whole % 60
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def _scanline_layer(self) -> Image.Image:
+        key = (self.width, self.height)
+        cached = self._scanlines_cache.get(key)
+        if cached is None:
+            rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+            rgba[3::4, :, 3] = 15
+            cached = Image.fromarray(rgba, mode="RGBA")
+            self._scanlines_cache[key] = cached
+        return cached
+
+    def _vignette_layer(self) -> Image.Image:
+        key = (self.width, self.height)
+        cached = self._vignette_cache.get(key)
+        if cached is None:
+            y, x = np.ogrid[: self.height, : self.width]
+            nx = (x - self.width * 0.5) / (self.width * 0.5)
+            ny = (y - self.height * 0.5) / (self.height * 0.5)
+            distance = np.sqrt(nx * nx + ny * ny)
+            alpha = np.clip((distance - 0.74) / 0.26, 0.0, 1.0)
+            alpha = np.power(alpha, 1.65)
+            rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+            rgba[:, :, 3] = np.clip(alpha * 142.0, 0.0, 255.0).astype(np.uint8)
+            cached = Image.fromarray(rgba, mode="RGBA")
+            self._vignette_cache[key] = cached
+        return cached
+
     def _draw_camera_frame(
         self,
         frame_bgr: np.ndarray,
@@ -663,7 +1099,20 @@ class SceneRenderer:
         right_landmarks: Optional[Sequence[tuple[float, float, float]]],
         left_caption: str,
         right_caption: str,
+        *,
+        rect: tuple[int, int, int, int] | None = None,
+        opacity: float = 0.94,
+        darken: float = 1.0,
     ) -> None:
+        target_rect = rect or (
+            self.width - self._s(28) - PIP_W,
+            self.height - self._s(24) - PIP_H,
+            self.width - self._s(28),
+            self.height - self._s(24),
+        )
+        left, top, right, bottom = target_rect
+        width = max(1, right - left)
+        height = max(1, bottom - top)
         if self._cv2 is None:
             try:
                 import cv2
@@ -671,29 +1120,29 @@ class SceneRenderer:
                 cv2 = None
             self._cv2 = cv2
         if self._cv2 is not None:
-            preview = self._cv2.resize(frame_bgr, (PIP_W, PIP_H))
+            preview = self._cv2.resize(frame_bgr, (width, height))
             preview_rgb = self._cv2.cvtColor(preview, self._cv2.COLOR_BGR2RGB)
         else:  # pragma: no cover - only used when cv2 is unavailable
             preview = np.asarray(frame_bgr)
-            preview_rgb = np.resize(preview[:, :, ::-1], (PIP_H, PIP_W, 3))
+            preview_rgb = np.resize(preview[:, :, ::-1], (height, width, 3))
         if left_landmarks or right_landmarks:
-            overlay = pygame.Surface((PIP_W, PIP_H), pygame.SRCALPHA)
+            overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             if left_landmarks:
-                draw_hand_skeleton(overlay, left_landmarks, PIP_W, PIP_H, caption=left_caption)
+                draw_hand_skeleton(overlay, left_landmarks, width, height, caption=left_caption)
             if right_landmarks:
-                draw_hand_skeleton(overlay, right_landmarks, PIP_W, PIP_H, caption=right_caption)
+                draw_hand_skeleton(overlay, right_landmarks, width, height, caption=right_caption)
             overlay_rgba = pygame.image.tobytes(overlay, "RGBA")
-            overlay_rgba = np.frombuffer(overlay_rgba, dtype=np.uint8).reshape(PIP_H, PIP_W, 4)
+            overlay_rgba = np.frombuffer(overlay_rgba, dtype=np.uint8).reshape(height, width, 4)
             alpha = overlay_rgba[:, :, 3:4].astype(np.float32) / 255.0
             preview_rgb = (
                 preview_rgb.astype(np.float32) * (1.0 - alpha)
                 + overlay_rgba[:, :, :3].astype(np.float32) * alpha
             ).astype(np.uint8)
+        if darken < 1.0:
+            preview_rgb = np.clip(preview_rgb.astype(np.float32) * darken, 0.0, 255.0).astype(np.uint8)
         preview_rgb = np.flipud(preview_rgb).astype(np.uint8, copy=False)
         self.camera_texture.write(preview_rgb.tobytes())
-        x = self.width - PIP_W - (PIP_MARGIN + 24)
-        y = self.height - PIP_H - (PIP_MARGIN + 28)
-        self._render_quad_texture(self.camera_texture, (x, y, PIP_W, PIP_H), opacity=0.94)
+        self._render_quad_texture(self.camera_texture, (left, top, width, height), opacity=opacity)
 
     def tick(self) -> float:
         pygame.display.flip()

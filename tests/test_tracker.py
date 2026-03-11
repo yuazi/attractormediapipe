@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
-from hands.tracker import _assign_hand_slots, _normalize_handedness_label
+from hands.tracker import _assign_hand_slots, _ensure_model, _normalize_handedness_label
 
 
 def make_hand(center_x: float) -> list[tuple[float, float, float]]:
@@ -48,6 +49,11 @@ class TrackerTests(unittest.TestCase):
         slots = _assign_hand_slots([(None, make_hand(0.77))])
         self.assertIsNotNone(slots["right"])
         self.assertIsNone(slots["left"])
+
+    def test_missing_bundled_model_raises_instead_of_downloading(self) -> None:
+        with mock.patch("hands.tracker.os.path.exists", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "Missing bundled MediaPipe model"):
+                _ensure_model()
 
 
 if __name__ == "__main__":

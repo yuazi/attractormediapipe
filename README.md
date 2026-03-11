@@ -10,8 +10,8 @@ Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`,
 - Numba-compiled RK4 stepping and batched sampling for live trails and snapshot exports
 - ModernGL real-time renderer with additive point glow and shader-driven pulse / Y-axis drift
 - Gesture actions: left pinky touch resets the current attractor, right pinky touch switches to the next
-- Screenshot-inspired overlay with helper panel, figure list, placard, and live parameter sliders
-- Optional webcam PiP with MediaPipe hand tracking and skeleton overlays
+- Grid-based HUD overlay with named study navigation, frosted utility panels, study placard, and live parameter sliders
+- Stylized PiP camera panel with optional live webcam feed and MediaPipe hand tracking overlays
 - 4K Datashader export of the currently active attractor with inferno density coloring
 
 ## Install
@@ -65,8 +65,8 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 - `SPACE`: pause / resume
 - `R`: restart the current attractor from an empty trail so you can watch it grow again
 - `S`: export a 4K Datashader snapshot of the current attractor
-- `H`: toggle overlay
-- `C`: toggle camera PiP
+- `H`: collapse or expand the shortcuts panel
+- `C`: toggle the live camera feed inside the PiP
 - `M`: focus mode, showing only the attractor and camera PiP
 - `1`-`9`: switch attractors directly
 - `UP` / `DOWN`: adjust simulation speed
@@ -77,8 +77,8 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 
 ## UI notes
 
-- The live overlay follows the composition shown in [assets/readme_lorenz_ui.png](assets/readme_lorenz_ui.png): coordinate readout at the top-left, helper panel on the left, placard at the bottom-left, parameter panel upper-right, and `figure.` list on the right.
-- The camera PiP includes the hand skeleton overlay. The left hand uses thumb-index for `Speed` and thumb-ring for `Luminosity`; the right hand uses thumb-index for `Scale` and thumb-ring for trail length, while pinky-touch actions briefly show `Reset` or `Switch` at the gesture location.
+- The HUD now uses a three-by-three screen grid: coordinates top-left, `(y)us` title top-center, named study navigator top-right, shortcuts mid-left, parameters mid-right, study placard bottom-left, status bottom-center, and the PiP panel bottom-right.
+- The PiP panel is always present as part of the HUD chrome. When `C` is enabled and a camera feed is available, the live image renders underneath the scanlines, brackets, and recording/status labels.
 
 ## Snapshot details
 

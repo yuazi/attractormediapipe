@@ -112,6 +112,10 @@ class Attractor(ABC):
             raise NotImplementedError(f"{self.__class__.__name__} is missing kernel_sample")
         if count < 1:
             return np.empty((0, 3), dtype=np.float32)
+        if burn_in < 0:
+            raise ValueError("burn_in must be >= 0")
+        if sample_stride < 1:
+            raise ValueError("sample_stride must be >= 1")
 
         start_state = tuple(initial_state) if initial_state is not None else tuple(float(value) for value in self.state)
         buffer = out if out is not None else np.empty((count, 3), dtype=np.float32)

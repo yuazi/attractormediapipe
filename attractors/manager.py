@@ -33,6 +33,18 @@ ACTIVE_ATTRACTOR_TYPES = (
 
 INACTIVE_ATTRACTOR_TYPES = ()
 
+HUD_ACCENT_OVERRIDES: dict[str, tuple[int, int, int]] = {
+    "Lorenz": (230, 57, 70),
+    "Rossler": (244, 162, 97),
+    "Halvorsen": (82, 183, 136),
+    "Dadras": (76, 201, 240),
+    "Chen": (199, 125, 255),
+    "Aizawa": (255, 209, 102),
+    "Thomas": (255, 107, 157),
+    "Sprott B": (6, 214, 160),
+    "Langford": (17, 138, 178),
+}
+
 PLACARD_MEDIUM = "Generative computation, real-time\nrendering on custom software"
 
 
@@ -207,7 +219,7 @@ class AttractorManager:
 
     @property
     def color(self) -> tuple[int, int, int]:
-        return self.current.color
+        return HUD_ACCENT_OVERRIDES.get(self.name, self.current.color)
 
     @property
     def scale_hint(self) -> float:
