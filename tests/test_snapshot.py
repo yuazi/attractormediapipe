@@ -8,9 +8,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 from PIL import Image
 
-from renderer.snapshot import SnapshotController, SnapshotRequest, ensure_snapshot_environment, export_attractor_snapshot, snapshot_filename
+from renderer.snapshot import SnapshotController, SnapshotRequest, _render_density_image, ensure_snapshot_environment, export_attractor_snapshot, snapshot_filename
 
 
 class SnapshotTests(unittest.TestCase):
@@ -60,6 +61,17 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(output.parent, Path("screenshot"))
         self.assertTrue(output.name.startswith("attractor_"))
         self.assertEqual(output.suffix, ".png")
+
+    def test_snapshot_density_palette_tracks_attractor_accent(self) -> None:
+        density = np.array([[0.0, 1.0], [4.0, 12.0]], dtype=np.float32)
+        warm = _render_density_image(density, 0.8, (230, 57, 70))
+        cool = _render_density_image(density, 0.8, (17, 138, 178))
+
+        warm_mean = warm[density > 0.0].mean(axis=0)
+        cool_mean = cool[density > 0.0].mean(axis=0)
+
+        self.assertGreater(warm_mean[0], warm_mean[2])
+        self.assertGreater(cool_mean[2], cool_mean[0])
 
     def test_snapshot_controller_close_waits_for_active_export(self) -> None:
         controller = SnapshotController()

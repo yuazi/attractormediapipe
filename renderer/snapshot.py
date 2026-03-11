@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from attractors.manager import create_active_attractor, normalize_points
+from attractors.manager import HUD_ACCENT_OVERRIDES, create_active_attractor, normalize_points
 from config import (
     DEFAULT_DT,
     SCREENSHOT_DIR,
@@ -118,17 +118,25 @@ def snapshot_filename(prefix: str = SCREENSHOT_PREFIX) -> str:
     return str(Path(SCREENSHOT_DIR) / f"{prefix}_{timestamp}.png")
 
 
-def inferno_palette(values: np.ndarray) -> np.ndarray:
-    stops = np.array(
-        [
-            [0.001, 0.000, 0.014],
-            [0.208, 0.016, 0.350],
-            [0.562, 0.141, 0.410],
-            [0.865, 0.317, 0.226],
-            [0.987, 0.645, 0.039],
-            [0.988, 0.998, 0.645],
-        ],
-        dtype=np.float32,
+def _accent_palette(values: np.ndarray, accent: tuple[int, int, int]) -> np.ndarray:
+    accent_rgb = np.asarray(accent, dtype=np.float32) / np.float32(255.0)
+    shadow = accent_rgb * np.float32(0.12)
+    low = accent_rgb * np.float32(0.34)
+    mid = accent_rgb * np.float32(0.60)
+    bright = accent_rgb + (1.0 - accent_rgb) * np.float32(0.18)
+    glow = accent_rgb + (1.0 - accent_rgb) * np.float32(0.42)
+    hot = accent_rgb + (1.0 - accent_rgb) * np.float32(0.82)
+    stops = np.stack(
+        (
+            np.zeros(3, dtype=np.float32),
+            shadow,
+            low,
+            mid,
+            bright,
+            glow,
+            hot,
+        ),
+        axis=0,
     )
     positions = np.linspace(0.0, 1.0, num=len(stops), dtype=np.float32)
     clipped = np.clip(values.astype(np.float32, copy=False), 0.0, 1.0)
@@ -136,16 +144,18 @@ def inferno_palette(values: np.ndarray) -> np.ndarray:
     return np.stack(channels, axis=1).astype(np.float32, copy=False)
 
 
-def _render_density_image(density: np.ndarray, luminosity: float) -> np.ndarray:
+def _render_density_image(density: np.ndarray, luminosity: float, accent: tuple[int, int, int]) -> np.ndarray:
     density = np.asarray(density, dtype=np.float32)
     density = np.flipud(density)
     density_log = np.log1p(density * (1.6 + max(0.0, luminosity)))
     peak = max(float(np.max(density_log)), 1e-6)
     density_norm = np.clip(density_log / peak, 0.0, 1.0)
 
-    rgb = inferno_palette(density_norm.reshape(-1)).reshape(density.shape[0], density.shape[1], 3)
+    accent_rgb = (np.asarray(accent, dtype=np.float32) / np.float32(255.0)).reshape(1, 1, 3)
+    rgb = _accent_palette(density_norm.reshape(-1), accent).reshape(density.shape[0], density.shape[1], 3)
     rgb *= np.power(density_norm[..., None], 0.78)
-    rgb += np.power(density_norm[..., None], 2.2) * (0.10 + 0.25 * max(0.05, luminosity))
+    rgb += accent_rgb * np.power(density_norm[..., None], 1.35) * np.float32(0.08)
+    rgb += np.power(density_norm[..., None], 2.2) * (0.08 + 0.22 * max(0.05, luminosity))
     return np.clip(np.power(rgb, 0.92), 0.0, 1.0)
 
 
@@ -154,6 +164,7 @@ def export_attractor_snapshot(request: SnapshotRequest) -> str:
     ds, pd = _import_datashader_dependencies()
 
     attractor = create_active_attractor(request.attractor_name)
+    accent = HUD_ACCENT_OVERRIDES.get(attractor.name, attractor.color)
     if request.state is not None:
         attractor.set_state(request.state)
 
@@ -191,7 +202,7 @@ def export_attractor_snapshot(request: SnapshotRequest) -> str:
     dataframe = pd.DataFrame({"x": x, "y": y})
     canvas = ds.Canvas(plot_width=request.width, plot_height=request.height, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0))
     density = canvas.points(dataframe, "x", "y", agg=ds.count())
-    rgb = _render_density_image(np.asarray(density), request.luminosity)
+    rgb = _render_density_image(np.asarray(density), request.luminosity, accent)
 
     output = request.output_path or snapshot_filename()
     output_path = Path(output)
