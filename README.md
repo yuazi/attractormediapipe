@@ -20,6 +20,8 @@ Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`,
 python3 -m pip install -r requirements.txt
 ```
 
+The dependency file is pinned to a tested package set so GitHub installs are reproducible. The HUD ships with bundled `Plus Jakarta Sans`, `Bebas Neue`, and `Onest` font files in `assets/fonts`, so a fresh clone renders with the intended typography. `Neue Haas Grotesk` is treated as an optional local fallback and is not required.
+
 ## Run
 
 ```bash

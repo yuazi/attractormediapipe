@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from typing import Iterable, Optional, Sequence, Tuple
 
 import pygame
@@ -18,14 +19,28 @@ HAND_CONNECTIONS = (
 _FONT_CACHE: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 _TEXT_CACHE: dict[tuple[str, Tuple[int, int, int], int], pygame.Surface] = {}
 _PINKY_CAPTIONS = {"Reset", "Switch"}
+_FONT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "fonts"))
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     cached = _FONT_CACHE.get(size)
     if cached is None:
-        try:
-            cached = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", size=size)
-        except OSError:
+        candidates = (
+            os.path.join(_FONT_DIR, "Onest-Medium.ttf"),
+            os.path.join(_FONT_DIR, "Onest-Regular.ttf"),
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "DejaVuSans.ttf",
+        )
+        for candidate in candidates:
+            candidate_path = os.path.expanduser(candidate)
+            if os.path.isabs(candidate_path) and not os.path.exists(candidate_path):
+                continue
+            try:
+                cached = ImageFont.truetype(candidate_path, size=size)
+                break
+            except OSError:
+                continue
+        if cached is None:
             cached = ImageFont.load_default(size=size)
         _FONT_CACHE[size] = cached
     return cached

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,7 +49,55 @@ def ensure_snapshot_environment() -> str:
     cache_dir = os.path.join(tempfile.gettempdir(), "attractor-numba-cache")
     os.makedirs(cache_dir, exist_ok=True)
     os.environ.setdefault("NUMBA_CACHE_DIR", cache_dir)
+    os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "attractor-mpl-cache"))
+    os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
     return cache_dir
+
+
+def _clear_partial_datashader_modules() -> None:
+    for name in list(sys.modules):
+        if name == "datashader" or name.startswith("datashader."):
+            sys.modules.pop(name, None)
+
+
+@contextmanager
+def _datashader_numba_cache_disabled():
+    import numba
+
+    original_jit = numba.jit
+    original_njit = numba.njit
+
+    def _without_cache(factory):
+        def wrapper(*args, **kwargs):
+            kwargs = dict(kwargs)
+            kwargs["cache"] = False
+            return factory(*args, **kwargs)
+
+        return wrapper
+
+    numba.jit = _without_cache(original_jit)
+    numba.njit = _without_cache(original_njit)
+    try:
+        yield
+    finally:
+        numba.jit = original_jit
+        numba.njit = original_njit
+
+
+def _import_datashader_dependencies():
+    try:
+        import datashader as ds
+        import pandas as pd
+    except RuntimeError as exc:
+        if "cannot cache function" not in str(exc):
+            raise
+        _clear_partial_datashader_modules()
+        with _datashader_numba_cache_disabled():
+            import datashader as ds  # type: ignore[no-redef]
+            import pandas as pd  # type: ignore[no-redef]
+    except ImportError as exc:
+        raise RuntimeError("Datashader snapshots require datashader and pandas to be installed") from exc
+    return ds, pd
 
 
 def snapshot_filename(prefix: str = SCREENSHOT_PREFIX) -> str:
@@ -88,11 +138,7 @@ def _render_density_image(density: np.ndarray, luminosity: float) -> np.ndarray:
 
 def export_attractor_snapshot(request: SnapshotRequest) -> str:
     ensure_snapshot_environment()
-    try:
-        import datashader as ds
-        import pandas as pd
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError("Datashader snapshots require datashader and pandas to be installed") from exc
+    ds, pd = _import_datashader_dependencies()
 
     attractor = create_active_attractor(request.attractor_name)
     if request.state is not None:

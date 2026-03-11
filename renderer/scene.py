@@ -38,6 +38,9 @@ from hands.skeleton import draw_hand_skeleton
 from .common import compute_mvp
 
 
+FONT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "fonts"))
+
+
 VERTEX_SHADER = """
 #version 330
 
@@ -238,47 +241,81 @@ class SceneRenderer:
         self.overlay_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self.camera_texture = self.ctx.texture((PIP_W, PIP_H), 3)
         self.camera_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self._font_mono_small = self._load_font(12, "mono")
-        self._font_mono = self._load_font(16, "mono")
-        self._font_body = self._load_font(16, "sans")
-        self._font_body_bold = self._load_font(17, "sans_bold")
-        self._font_serif = self._load_font(18, "serif")
-        self._font_title = self._load_font(30, "serif_italic")
+        self._font_micro = self._load_font(13, "hud_micro")
+        self._font_ui = self._load_font(18, "hud_ui")
+        self._font_body = self._load_font(16, "hud_body")
+        self._font_body_bold = self._load_font(18, "hud_body_bold")
+        self._font_nav = self._load_font(25, "hud_nav")
+        self._font_title = self._load_font(40, "hud_title")
+        self._font_equation = self._load_font(13, "hud_equation")
         self.clock = pygame.time.Clock()
 
     def _load_font(self, size: int, style: str):
         families = {
-            "mono": [
-                "/System/Library/Fonts/Supplemental/Menlo.ttc",
-                "/Library/Fonts/Courier New.ttf",
-                "DejaVuSansMono.ttf",
-            ],
-            "sans": [
+            "hud_micro": [
+                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
+                os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
+                "~/Library/Fonts/neuehaasgrottext-55roman-trial.otf",
                 "/System/Library/Fonts/Supplemental/Helvetica.ttc",
                 "/Library/Fonts/Arial.ttf",
                 "DejaVuSans.ttf",
             ],
-            "sans_bold": [
-                "/Library/Fonts/Arial Bold.ttf",
+            "hud_ui": [
+                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
+                os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
+                "~/Library/Fonts/neuehaasgrottext-65medium-trial.otf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+                "/Library/Fonts/Arial.ttf",
+                "DejaVuSans.ttf",
+            ],
+            "hud_body": [
+                os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
+                os.path.join(FONT_DIR, "Onest-Regular.ttf"),
+                "~/Library/Fonts/PlusJakartaSans-VariableFont_wght.ttf",
+                "~/Library/Fonts/Onest-Regular.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+                "DejaVuSans.ttf",
+            ],
+            "hud_body_bold": [
+                os.path.join(FONT_DIR, "Onest-SemiBold.ttf"),
+                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
+                os.path.join(FONT_DIR, "PlusJakartaSans-VariableFont_wght.ttf"),
+                "~/Library/Fonts/Onest-SemiBold.ttf",
+                "~/Library/Fonts/Onest-Bold.ttf",
+                "~/Library/Fonts/PlusJakartaSans-VariableFont_wght.ttf",
                 "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
                 "DejaVuSans-Bold.ttf",
             ],
-            "serif": [
-                "/System/Library/Fonts/Supplemental/Georgia.ttf",
-                "/System/Library/Fonts/Supplemental/Baskerville.ttc",
-                "DejaVuSerif.ttf",
+            "hud_nav": [
+                os.path.join(FONT_DIR, "BebasNeue-Regular.ttf"),
+                "~/Library/Fonts/BebasNeue-Regular.ttf",
+                "~/Library/Fonts/neuehaasgrotdisp-65medium-trial.otf",
+                "/System/Library/Fonts/Supplemental/Impact.ttf",
+                "DejaVuSans-Bold.ttf",
             ],
-            "serif_italic": [
-                "/System/Library/Fonts/Supplemental/Georgia Italic.ttf",
-                "/System/Library/Fonts/Supplemental/Baskerville Italic.ttf",
-                "DejaVuSerif-Italic.ttf",
+            "hud_title": [
+                os.path.join(FONT_DIR, "BebasNeue-Regular.ttf"),
+                "~/Library/Fonts/BebasNeue-Regular.ttf",
+                "~/Library/Fonts/neuehaasgrotdisp-75bold-trial.otf",
+                "/System/Library/Fonts/Supplemental/Impact.ttf",
+                "DejaVuSans-Bold.ttf",
+            ],
+            "hud_equation": [
+                os.path.join(FONT_DIR, "Onest-Medium.ttf"),
+                os.path.join(FONT_DIR, "Onest-Regular.ttf"),
+                "~/Library/Fonts/Onest-Medium.ttf",
+                "~/Library/Fonts/Onest-Regular.ttf",
+                "~/Library/Fonts/neuehaasgrottext-55roman-trial.otf",
+                "DejaVuSansMono.ttf",
+                "DejaVuSans.ttf",
             ],
         }
-        for candidate in families.get(style, families["sans"]):
-            if os.path.isabs(candidate) and not os.path.exists(candidate):
+        for candidate in families.get(style, families["hud_body"]):
+            candidate_path = os.path.expanduser(candidate)
+            if os.path.isabs(candidate_path) and not os.path.exists(candidate_path):
                 continue
             try:
-                return ImageFont.truetype(candidate, size)
+                return ImageFont.truetype(candidate_path, size)
             except OSError:
                 continue
         return ImageFont.load_default()
@@ -367,27 +404,27 @@ class SceneRenderer:
     def _draw_coordinates(self, draw: ImageDraw.ImageDraw, state: SceneState) -> None:
         labels = ("x", "y", "z")
         x = 48
-        y = 34
-        gap = 74
+        y = 30
+        gap = 90
         for idx, label in enumerate(labels):
-            draw.text((x, y), label, font=self._font_mono_small, fill=HUD_MUTED)
+            draw.text((x, y), label.upper(), font=self._font_micro, fill=HUD_MUTED)
             value = f"{state.attractor_state[idx]:>7.3f}"
-            draw.text((x + 18, y + 12), value, font=self._font_mono, fill=HUD_TEXT)
+            draw.text((x + 22, y + 12), value, font=self._font_ui, fill=HUD_TEXT)
             x += gap
 
     def _draw_navigation(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
         x, y, spacing, _ = self._navigation_metrics(state)
         for idx, _name in enumerate(state.attractor_names):
-            label = f"figure. {idx + 1}"
+            label = f"FIGURE {idx + 1}"
             color = accent if idx == state.attractor_index else HUD_MUTED
-            draw.text((x, y + idx * spacing), label, font=self._font_serif, fill=color)
+            draw.text((x, y + idx * spacing), label, font=self._font_nav, fill=color)
 
     def _navigation_metrics(self, state: SceneState) -> tuple[int, int, int, int]:
-        labels = [f"figure. {idx + 1}" for idx in range(len(state.attractor_names))]
-        max_width = max(self._text_width(label, self._font_serif) for label in labels)
+        labels = [f"FIGURE {idx + 1}" for idx in range(len(state.attractor_names))]
+        max_width = max(self._text_width(label, self._font_nav) for label in labels)
         x = self.width - 54 - max_width
         y = 58
-        spacing = 33
+        spacing = 28
         return x, y, spacing, max_width
 
     def _draw_control_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
@@ -395,10 +432,10 @@ class SceneRenderer:
         panel_x, panel_y, panel_right, panel_bottom = panel_rect
         panel_width = panel_right - panel_x
         panel_height = panel_bottom - panel_y
-        fill = (*HUD_PANEL_COLOR[:3], 220)
+        fill = (*HUD_PANEL_COLOR[:3], 232)
         border = (*HUD_PANEL_BORDER, 255)
         draw.rounded_rectangle((panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), radius=18, fill=fill, outline=border, width=1)
-        draw.text((panel_x + 18, panel_y + 14), "Parameters", font=self._font_mono_small, fill=HUD_TEXT)
+        draw.text((panel_x + 18, panel_y + 12), "Parameters", font=self._font_body_bold, fill=HUD_TEXT)
 
         rows = {
             "speed": ("Speed", state.speed, SPEED_RANGE),
@@ -424,27 +461,27 @@ class SceneRenderer:
         self._draw_action_button(draw, button_rect, "Reset trail", accent)
         status = "paused" if state.paused else "exporting..." if state.exporting else state.export_message or "live"
         status_fill = accent if not state.paused else HUD_BAR_FILL
-        draw.text((panel_x + 18, panel_y + panel_height - 24), status, font=self._font_mono_small, fill=status_fill)
+        draw.text((panel_x + 18, panel_y + panel_height - 24), status.upper(), font=self._font_micro, fill=status_fill)
 
     def _draw_helper_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
         panel_x = 44
         panel_y = 104
-        panel_width = 248
+        panel_width = 270
         help_lines = [
             "Overlay helper",
-            "1-9 switch attractor",
-            "R restart trail growth",
+            "1-9 switch attractors",
+            "R reset current trail",
             "SPACE pause or resume",
-            "S save 4K snapshot",
-            "Mouse wheel zoom",
-            "Left: speed glow reset",
-            "Right: yaw pitch zoom",
-            "Right ring: trail length",
-            "Right pinky: switch scene",
+            "S export 4K snapshot",
+            "Mouse wheel controls zoom",
+            "Left hand controls speed, glow, reset",
+            "Right hand controls yaw, pitch, zoom",
+            "Right ring pinch sets trail length",
+            "Right pinky touch switches scene",
         ]
-        line_height = 18
+        line_height = 20
         panel_height = 28 + len(help_lines) * line_height + 14
-        fill = (*HUD_PANEL_COLOR[:3], 205)
+        fill = (*HUD_PANEL_COLOR[:3], 220)
         border = (*HUD_PANEL_BORDER, 255)
         draw.rounded_rectangle(
             (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height),
@@ -458,7 +495,7 @@ class SceneRenderer:
             if idx == 0:
                 draw.text((panel_x + 16, cursor_y), line, font=self._font_body_bold, fill=accent)
             else:
-                draw.text((panel_x + 16, cursor_y), line, font=self._font_mono_small, fill=HUD_HELP_TEXT)
+                draw.text((panel_x + 16, cursor_y), line, font=self._font_body, fill=HUD_HELP_TEXT)
             cursor_y += line_height
 
     def _draw_slider_row(
@@ -477,16 +514,16 @@ class SceneRenderer:
         minimum, maximum = value_range
         ratio = 0.0 if maximum <= minimum else max(0.0, min(1.0, (value - minimum) / (maximum - minimum)))
         label_y = y
-        track_y = y + 20
+        track_y = y + 22
         value_text = f"{value:0.2f}" if label != "Trail length" else f"{int(round(value))}"
-        draw.text((x, label_y), label, font=self._font_serif, fill=HUD_TEXT)
-        value_w = self._text_width(value_text, self._font_mono_small)
-        draw.text((x + width - value_w, label_y + 1), value_text, font=self._font_mono_small, fill=HUD_BAR_FILL)
-        draw.line((x, track_y, x + width, track_y), fill=HUD_BAR_BG, width=2)
+        draw.text((x, label_y), label, font=self._font_body, fill=HUD_TEXT)
+        value_w = self._text_width(value_text, self._font_micro)
+        draw.text((x + width - value_w, label_y + 2), value_text, font=self._font_micro, fill=HUD_BAR_FILL)
+        draw.line((x, track_y, x + width, track_y), fill=HUD_BAR_BG, width=3)
         fill_end = x + int(width * ratio)
         if fill_end > x:
-            draw.line((x, track_y, fill_end, track_y), fill=accent, width=2)
-        knob_radius = 5 if active else 4
+            draw.line((x, track_y, fill_end, track_y), fill=accent, width=3)
+        knob_radius = 6 if active else 5
         knob_fill = accent if active else HUD_BAR_FILL
         draw.ellipse((fill_end - knob_radius, track_y - knob_radius, fill_end + knob_radius, track_y + knob_radius), fill=knob_fill)
 
@@ -501,33 +538,34 @@ class SceneRenderer:
         fill = (*HUD_BAR_BG, 255)
         border = (*accent, 255)
         draw.rounded_rectangle((left, top, right, bottom), radius=12, fill=fill, outline=border, width=1)
-        label_w = self._text_width(label, self._font_mono_small)
+        label_w = self._text_width(label, self._font_body_bold)
+        label_h = self._text_height(label, self._font_body_bold)
         label_x = left + max(0, (right - left - label_w) // 2)
-        label_y = top + max(0, (bottom - top - 14) // 2)
-        draw.text((label_x, label_y), label, font=self._font_mono_small, fill=HUD_TEXT)
+        label_y = top + max(0, (bottom - top - label_h) // 2) - 1
+        draw.text((label_x, label_y), label, font=self._font_body_bold, fill=HUD_TEXT)
 
     def _control_panel_layout(
         self,
         attractor_names: Sequence[str],
     ) -> tuple[tuple[int, int, int, int], dict[str, tuple[int, int, int, int]], tuple[int, int, int, int]]:
-        labels = [f"figure. {idx + 1}" for idx in range(len(attractor_names))]
-        max_width = max(self._text_width(label, self._font_serif) for label in labels) if labels else 0
+        labels = [f"FIGURE {idx + 1}" for idx in range(len(attractor_names))]
+        max_width = max(self._text_width(label, self._font_nav) for label in labels) if labels else 0
         nav_x = self.width - 54 - max_width
         panel_width = 310
-        panel_height = 252
+        panel_height = 262
         panel_gap = 34
         panel_x = max(48, nav_x - panel_gap - panel_width)
         panel_y = 60
         track_rects: dict[str, tuple[int, int, int, int]] = {}
-        row_y = panel_y + 40
+        row_y = panel_y + 46
         for slider_id, _value_range in CONTROL_SLIDERS:
             track_left = panel_x + 18
             track_top = row_y + 20
             track_right = panel_x + panel_width - 18
             track_bottom = track_top + 10
             track_rects[slider_id] = (track_left, track_top, track_right, track_bottom)
-            row_y += 38
-        button_rect = (panel_x + 18, panel_y + 192, panel_x + panel_width - 18, panel_y + 224)
+            row_y += 42
+        button_rect = (panel_x + 18, panel_y + 204, panel_x + panel_width - 18, panel_y + 238)
         return (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), track_rects, button_rect
 
     def control_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> Optional[str]:
@@ -557,41 +595,41 @@ class SceneRenderer:
 
     def _draw_placard(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
         x = 48
-        placard_width = 275
+        placard_width = 295
         equation_lines = self._wrap_lines(state.placard_equation, 34)
         medium_lines = self._wrap_lines(state.placard_medium, 34)
         row_count = len(list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")])
-        content_height = 18 + 26 + 34 + 22 + len(equation_lines) * 14 + 8 + len(medium_lines) * 16 + 10 + 12 + row_count * 15
+        content_height = 18 + 28 + 42 + 22 + len(equation_lines) * 15 + 10 + len(medium_lines) * 18 + 10 + 12 + row_count * 16
         y = self.height - content_height - 24
         draw.line((x, y, x + 22, y), fill=HUD_BAR_FILL, width=1)
         cursor_y = y + 18
-        draw.text((x, cursor_y), f"Study no. {self._roman(state.attractor_index + 1)}", font=self._font_mono_small, fill=HUD_MUTED)
-        cursor_y += 26
+        draw.text((x, cursor_y), f"STUDY NO. {self._roman(state.attractor_index + 1)}", font=self._font_micro, fill=HUD_MUTED)
+        cursor_y += 28
         draw.text((x, cursor_y), state.placard_title, font=self._font_title, fill=accent)
-        cursor_y += 34
-        draw.text((x, cursor_y), state.placard_year, font=self._font_serif, fill=HUD_MUTED)
+        cursor_y += 42
+        draw.text((x, cursor_y), state.placard_year, font=self._font_body_bold, fill=HUD_MUTED)
         cursor_y += 22
         for line in equation_lines:
-            draw.text((x, cursor_y), line, font=self._font_mono_small, fill=HUD_TEXT)
-            cursor_y += 14
-        cursor_y += 8
+            draw.text((x, cursor_y), line, font=self._font_equation, fill=HUD_TEXT)
+            cursor_y += 15
+        cursor_y += 10
         for line in medium_lines:
-            draw.text((x, cursor_y), line, font=self._font_serif, fill=HUD_HELP_TEXT)
-            cursor_y += 16
+            draw.text((x, cursor_y), line, font=self._font_body, fill=HUD_HELP_TEXT)
+            cursor_y += 18
         cursor_y += 10
         draw.line((x, cursor_y, x + placard_width, cursor_y), fill=HUD_PANEL_BORDER, width=1)
         cursor_y += 12
         rows = list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")]
         for label, value in rows:
-            draw.text((x, cursor_y), label, font=self._font_mono_small, fill=HUD_MUTED)
-            value_w = self._text_width(value, self._font_mono_small)
-            draw.text((x + placard_width - value_w, cursor_y), value, font=self._font_mono_small, fill=HUD_TEXT)
-            cursor_y += 15
+            draw.text((x, cursor_y), label.upper(), font=self._font_micro, fill=HUD_MUTED)
+            value_w = self._text_width(value, self._font_micro)
+            draw.text((x + placard_width - value_w, cursor_y), value, font=self._font_micro, fill=HUD_TEXT)
+            cursor_y += 16
 
     def _draw_footer(self, draw: ImageDraw.ImageDraw, state: SceneState) -> None:
         footer = f"{state.fps:>4.1f} FPS"
-        footer_w = self._text_width(footer, self._font_mono_small)
-        draw.text(((self.width - footer_w) // 2, self.height - 28), footer, font=self._font_mono_small, fill=HUD_MUTED)
+        footer_w = self._text_width(footer, self._font_micro)
+        draw.text(((self.width - footer_w) // 2, self.height - 28), footer, font=self._font_micro, fill=HUD_MUTED)
 
     def _wrap_lines(self, text: str, width: int) -> list[str]:
         lines: list[str] = []
@@ -613,6 +651,10 @@ class SceneRenderer:
     def _text_width(self, text: str, font) -> int:
         bbox = font.getbbox(text or " ")
         return max(1, bbox[2] - bbox[0] + 2)
+
+    def _text_height(self, text: str, font) -> int:
+        bbox = font.getbbox(text or " ")
+        return max(1, bbox[3] - bbox[1] + 2)
 
     def _draw_camera_frame(
         self,
