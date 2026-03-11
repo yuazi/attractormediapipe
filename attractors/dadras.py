@@ -73,5 +73,9 @@ class DadrasAttractor(Attractor):
         self.e = e
         super().__init__()
 
+    def initial_state(self):
+        # Avoid the y=z=0 invariant axis, which collapses this system to a dead line.
+        return (0.1, 0.1, 0.1)
+
     def kernel_params(self) -> tuple[float, float, float, float, float]:
         return (self.p, self.q, self.r, self.c, self.e)

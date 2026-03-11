@@ -160,6 +160,7 @@ class SceneState:
     placard_title: str
     placard_year: str
     placard_medium: str
+    placard_equation: str
     placard_params: Sequence[tuple[str, str]]
     yaw: float
     pitch: float
@@ -431,14 +432,15 @@ class SceneRenderer:
         panel_width = 248
         help_lines = [
             "Overlay helper",
-            "1-7 switch attractor",
+            "1-9 switch attractor",
             "R restart trail growth",
             "SPACE pause or resume",
             "S save 4K snapshot",
             "Mouse wheel zoom",
-            "Left hand: yaw pitch speed",
-            "Right hand: glow zoom",
-            "Pinky touch: switch scene",
+            "Left: speed glow reset",
+            "Right: yaw pitch zoom",
+            "Right ring: trail length",
+            "Right pinky: switch scene",
         ]
         line_height = 18
         panel_height = 28 + len(help_lines) * line_height + 14
@@ -556,7 +558,11 @@ class SceneRenderer:
     def _draw_placard(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
         x = 48
         placard_width = 275
-        y = self.height - 238
+        equation_lines = self._wrap_lines(state.placard_equation, 34)
+        medium_lines = self._wrap_lines(state.placard_medium, 34)
+        row_count = len(list(state.placard_params[:3]) + [("points", f"{state.point_count:,}")])
+        content_height = 18 + 26 + 34 + 22 + len(equation_lines) * 14 + 8 + len(medium_lines) * 16 + 10 + 12 + row_count * 15
+        y = self.height - content_height - 24
         draw.line((x, y, x + 22, y), fill=HUD_BAR_FILL, width=1)
         cursor_y = y + 18
         draw.text((x, cursor_y), f"Study no. {self._roman(state.attractor_index + 1)}", font=self._font_mono_small, fill=HUD_MUTED)
@@ -565,7 +571,10 @@ class SceneRenderer:
         cursor_y += 34
         draw.text((x, cursor_y), state.placard_year, font=self._font_serif, fill=HUD_MUTED)
         cursor_y += 22
-        medium_lines = self._wrap_lines(state.placard_medium, 34)
+        for line in equation_lines:
+            draw.text((x, cursor_y), line, font=self._font_mono_small, fill=HUD_TEXT)
+            cursor_y += 14
+        cursor_y += 8
         for line in medium_lines:
             draw.text((x, cursor_y), line, font=self._font_serif, fill=HUD_HELP_TEXT)
             cursor_y += 16

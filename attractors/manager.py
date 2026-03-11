@@ -27,12 +27,11 @@ ACTIVE_ATTRACTOR_TYPES = (
     DadrasAttractor,
     ChenAttractor,
     LangfordAttractor,
-)
-
-INACTIVE_ATTRACTOR_TYPES = (
     RosslerAttractor,
     HalvorsenAttractor,
 )
+
+INACTIVE_ATTRACTOR_TYPES = ()
 
 PLACARD_MEDIUM = "Generative computation, real-time\nrendering on custom software"
 
@@ -42,6 +41,7 @@ class PlacardData:
     title: str
     year: str
     medium: str
+    equation: str
     params: tuple[tuple[str, str], ...]
 
 
@@ -49,44 +49,65 @@ PLACARD_OVERRIDES = {
     "Lorenz": PlacardData(
         title="Lorenz Attractor",
         year="E. N. Lorenz, 1963",
-        medium=PLACARD_MEDIUM,
+        medium="Atmospheric convection model,\ndissipative chaotic flow",
+        equation="xdot = sigma(y - x)\nydot = x(rho - z) - y\nzdot = x*y - beta*z",
         params=(("sigma", "10.000"), ("rho", "28.000"), ("beta", "2.667")),
     ),
     "Aizawa": PlacardData(
         title="Aizawa Attractor",
         year="K. Aizawa, 1982",
-        medium=PLACARD_MEDIUM,
+        medium="Autonomous nonlinear flow,\ntoroidal strange attractor",
+        equation="xdot = (z - b)*x - d*y\nydot = d*x + (z - b)*y\nzdot = c + a*z - z^3/3 -\n(x^2 + y^2)(1 + e*z) + f*z*x^3",
         params=(("a", "0.950"), ("b", "0.700"), ("c", "0.600")),
     ),
     "Sprott B": PlacardData(
         title="Sprott B Attractor",
         year="J. C. Sprott, 1994",
-        medium=PLACARD_MEDIUM,
+        medium="Minimal quadratic flow,\nSprott class-B chaos",
+        equation="xdot = a*y*z\nydot = x - b*y\nzdot = 1 - x*y",
         params=(("a", "1.000"), ("b", "1.000"), ("class", "B")),
     ),
     "Thomas": PlacardData(
         title="Thomas' Attractor",
         year="Rene Thomas, 1999",
-        medium=PLACARD_MEDIUM,
+        medium="Cyclically symmetric flow,\nthree coupled sine states",
+        equation="xdot = sin(y) - b*x\nydot = sin(z) - b*y\nzdot = sin(x) - b*z",
         params=(("b", "0.208"), ("symmetry", "cyclic"), ("dim", "3")),
     ),
     "Dadras": PlacardData(
         title="Dadras Attractor",
         year="S. Dadras et al., 2006",
-        medium=PLACARD_MEDIUM,
+        medium="Polynomial chaotic flow,\nstate-multiplying feedback",
+        equation="xdot = y - p*x + q*y*z\nydot = r*y - x*z + z\nzdot = c*x*y - e*z",
         params=(("p", "3.000"), ("q", "2.700"), ("r", "1.700")),
     ),
     "Chen": PlacardData(
         title="Chen Attractor",
         year="G. Chen and T. Ueta, 1999",
-        medium=PLACARD_MEDIUM,
+        medium="Lorenz-family chaotic flow,\nquadratic dissipative system",
+        equation="xdot = a(y - x)\nydot = (c - a)*x - x*z + c*y\nzdot = x*y - b*z",
         params=(("a", "35.000"), ("b", "3.000"), ("c", "28.000")),
     ),
     "Langford": PlacardData(
         title="Langford Attractor",
         year="W. F. Langford",
-        medium=PLACARD_MEDIUM,
+        medium="Torus-breakdown oscillator,\nfolded nonlinear flow",
+        equation="xdot = (z - beta)*x - omega*y\nydot = omega*x + (z - beta)*y\nzdot = lambda + alpha*z - z^3/3 -\n(x^2 + y^2)(1 + rho*z) + epsilon*z*x^3",
         params=(("alpha", "0.950"), ("beta", "0.700"), ("omega", "3.500")),
+    ),
+    "Rossler": PlacardData(
+        title="Rossler Attractor",
+        year="O. E. Rossler, 1976",
+        medium="Single-scroll spiral flow,\ncontinuous-time oscillator",
+        equation="xdot = -(y + z)\nydot = x + a*y\nzdot = b + z(x - c)",
+        params=(("a", "0.200"), ("b", "0.200"), ("c", "5.700")),
+    ),
+    "Halvorsen": PlacardData(
+        title="Halvorsen Attractor",
+        year="T. Halvorsen",
+        medium="Symmetric quadratic flow,\nthree-lobed chaotic system",
+        equation="xdot = -a*x - 4*y - 4*z - y^2\nydot = -a*y - 4*z - 4*x - z^2\nzdot = -a*z - 4*x - 4*y - x^2",
+        params=(("a", "1.400"), ("symmetry", "cyclic"), ("dim", "3")),
     ),
 }
 
@@ -218,6 +239,7 @@ class AttractorManager:
             title=f"{self.name} Attractor",
             year="Generative system study",
             medium=PLACARD_MEDIUM,
+            equation="xdot = f(x, y, z)\nydot = g(x, y, z)\nzdot = h(x, y, z)",
             params=fallback_rows,
         )
 

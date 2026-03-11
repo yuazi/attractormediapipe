@@ -31,6 +31,7 @@ class GestureFrame:
     speed: Optional[float] = None
     luminosity: Optional[float] = None
     trail_len: Optional[int] = None
+    reset_current: bool = False
     scene_delta: int = 0
     left_detected: bool = False
     right_detected: bool = False
@@ -79,8 +80,8 @@ def pinky_touch_distance(landmarks: List[Landmark]) -> float:
 
 class GestureInterpreter:
     def __init__(self) -> None:
-        self._last_scene_turn_time = float("-inf")
-        self._scene_turn_armed = {"left": True, "right": True}
+        self._last_pinky_action_time = float("-inf")
+        self._pinky_action_armed = {"left": True, "right": True}
 
     def update(self, hand_data: HandData, now: Optional[float] = None) -> GestureFrame:
         timestamp = time.monotonic() if now is None else now
@@ -95,9 +96,9 @@ class GestureInterpreter:
         if left:
             frame.speed = remap(pinch_distance(left), *PINCH_RANGE, *SPEED_RANGE)
             frame.luminosity = remap(ring_pinch_distance(left), *PINCH_RANGE, *LUMINOSITY_RANGE)
-            frame.scene_delta += self._update_scene_turn("left", left, timestamp, -1)
+            frame.reset_current = self._consume_pinky_action("left", left, timestamp)
         else:
-            self._scene_turn_armed["left"] = True
+            self._pinky_action_armed["left"] = True
 
         if right:
             wrist_x, wrist_y = wrist_position(right)
@@ -105,20 +106,21 @@ class GestureInterpreter:
             frame.pitch = remap(wrist_y, 0.0, 1.0, *PITCH_RANGE)
             frame.scale = remap(pinch_distance(right), *PINCH_RANGE, *SCALE_RANGE)
             frame.trail_len = int(round(remap(ring_pinch_distance(right), *PINCH_RANGE, float(MIN_TRAIL), float(MAX_TRAIL))))
-            frame.scene_delta += self._update_scene_turn("right", right, timestamp, 1)
+            if self._consume_pinky_action("right", right, timestamp):
+                frame.scene_delta += 1
         else:
-            self._scene_turn_armed["right"] = True
+            self._pinky_action_armed["right"] = True
 
         return frame
 
-    def _update_scene_turn(self, hand_label: str, landmarks: List[Landmark], now: float, delta: int) -> int:
+    def _consume_pinky_action(self, hand_label: str, landmarks: List[Landmark], now: float) -> bool:
         if pinky_touch_distance(landmarks) > SCENE_SWITCH_PINKY_TOUCH_MAX_DISTANCE:
-            self._scene_turn_armed[hand_label] = True
-            return 0
+            self._pinky_action_armed[hand_label] = True
+            return False
 
-        if not self._scene_turn_armed[hand_label] or now - self._last_scene_turn_time < SCENE_TURN_COOLDOWN_SECONDS:
-            return 0
+        if not self._pinky_action_armed[hand_label] or now - self._last_pinky_action_time < SCENE_TURN_COOLDOWN_SECONDS:
+            return False
 
-        self._scene_turn_armed[hand_label] = False
-        self._last_scene_turn_time = now
-        return delta
+        self._pinky_action_armed[hand_label] = False
+        self._last_pinky_action_time = now
+        return True

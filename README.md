@@ -1,15 +1,15 @@
 # ModernGL Strange Attractor Trail Viewer
 
-Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`, `datashader`, `opencv-python`, and `mediapipe`. The app renders a single active attractor as a glowing additive point trail in real time, keeps gesture-driven attractor switching, and exports 4K density snapshots with Datashader.
+Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`, `datashader`, `opencv-python`, and `mediapipe`. The app renders a single active attractor as a glowing additive point trail in real time, keeps gesture-driven attractor switching and reset, and exports 4K density snapshots with Datashader.
 
 ![Lorenz UI preview](assets/readme_lorenz_ui.png)
 
 ## Features
 
-- Seven active attractors: Lorenz, Aizawa, Sprott B, Thomas, Dadras, Chen, and Langford
+- Nine active attractors: Lorenz, Aizawa, Sprott B, Thomas, Dadras, Chen, Langford, Rossler, and Halvorsen
 - Numba-compiled RK4 stepping and batched sampling for live trails and snapshot exports
 - ModernGL real-time renderer with additive point glow and shader-driven pulse / Y-axis drift
-- Gesture switching: left pinky touch moves to the previous attractor, right pinky touch moves to the next
+- Gesture actions: left pinky touch resets the current attractor, right pinky touch switches to the next
 - Screenshot-inspired overlay with helper panel, figure list, placard, and live parameter sliders
 - Optional webcam PiP with MediaPipe hand tracking and skeleton overlays
 - 4K Datashader export of the currently active attractor with inferno density coloring
@@ -50,12 +50,12 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 
 - Left hand thumb + index pinch: simulation speed
 - Left hand thumb + ring pinch: luminosity
-- Left hand pinky touches palm: previous attractor, with `Previous` shown near the pinky-touch area in the PiP
+- Left hand pinky touches palm: reset the current attractor, with `Reset` shown near the pinky-touch area in the PiP
 - Right hand palm X: yaw
 - Right hand palm Y: pitch
 - Right hand thumb + index pinch: zoom
 - Right hand thumb + ring pinch: trail length
-- Right hand pinky touches palm: next attractor, with `Next` shown near the pinky-touch area in the PiP
+- Right hand pinky touches palm: switch to the next attractor, with `Switch` shown near the pinky-touch area in the PiP
 
 ### Keyboard and mouse
 
@@ -66,7 +66,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 - `H`: toggle overlay
 - `C`: toggle camera PiP
 - `M`: focus mode, showing only the attractor and camera PiP
-- `1`-`7`: switch attractors directly
+- `1`-`9`: switch attractors directly
 - `UP` / `DOWN`: adjust simulation speed
 - `LEFT` / `RIGHT`: adjust visible trail length
 - Mouse wheel: zoom
@@ -76,7 +76,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 ## UI notes
 
 - The live overlay follows the composition shown in [assets/readme_lorenz_ui.png](assets/readme_lorenz_ui.png): coordinate readout at the top-left, helper panel on the left, placard at the bottom-left, parameter panel upper-right, and `figure.` list on the right.
-- The camera PiP includes the hand skeleton overlay. The left hand uses thumb-index for `Speed` and thumb-ring for `Luminosity`; the right hand uses thumb-index for `Scale` and thumb-ring for trail length, while attractor switches briefly show `Previous` or `Next` at the pinky-touch location.
+- The camera PiP includes the hand skeleton overlay. The left hand uses thumb-index for `Speed` and thumb-ring for `Luminosity`; the right hand uses thumb-index for `Scale` and thumb-ring for trail length, while pinky-touch actions briefly show `Reset` or `Switch` at the gesture location.
 
 ## Snapshot details
 

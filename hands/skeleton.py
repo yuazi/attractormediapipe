@@ -17,7 +17,7 @@ HAND_CONNECTIONS = (
 
 _FONT_CACHE: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 _TEXT_CACHE: dict[tuple[str, Tuple[int, int, int], int], pygame.Surface] = {}
-_SWITCH_CAPTIONS = {"Next", "Previous"}
+_PINKY_CAPTIONS = {"Reset", "Switch"}
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -112,7 +112,7 @@ def draw_hand_skeleton(
         return
 
     text_surface = _render_text(caption, color, font_size)
-    if caption in _SWITCH_CAPTIONS and len(landmarks) >= 21:
+    if caption in _PINKY_CAPTIONS and len(landmarks) >= 21:
         pinky_tip = (int(landmarks[20][0] * width), int(landmarks[20][1] * height))
         palm_center = _palm_center_pixels(landmarks, width, height)
         anchor_x = int((pinky_tip[0] * 0.6) + (palm_center[0] * 0.4))

@@ -7,9 +7,11 @@ import numpy as np
 from attractors.aizawa import AizawaAttractor
 from attractors.chen import ChenAttractor
 from attractors.dadras import DadrasAttractor
+from attractors.halvorsen import HalvorsenAttractor
 from attractors.langford import LangfordAttractor
 from attractors.lorenz import LorenzAttractor
 from attractors.manager import AttractorManager, create_active_attractor, normalize_points, perspective_project, rotation_matrix
+from attractors.rossler import RosslerAttractor
 from attractors.sprott_b import SprottBAttractor
 from attractors.thomas import ThomasAttractor
 
@@ -27,6 +29,8 @@ class AttractorTests(unittest.TestCase):
             DadrasAttractor(),
             ChenAttractor(),
             LangfordAttractor(),
+            RosslerAttractor(),
+            HalvorsenAttractor(),
         ]
         for attractor in attractors:
             for _ in range(120):
@@ -34,13 +38,49 @@ class AttractorTests(unittest.TestCase):
                 self.assertEqual(point.shape, (3,))
                 self.assertTrue(np.isfinite(point).all(), attractor.name)
 
-    def test_manager_exposes_seven_active_attractors(self) -> None:
+    def test_manager_exposes_all_active_attractors(self) -> None:
         manager = self.make_manager()
-        self.assertEqual(manager.total, 7)
+        self.assertEqual(manager.total, 9)
         self.assertEqual(
             manager.names,
-            ("Lorenz", "Aizawa", "Sprott B", "Thomas", "Dadras", "Chen", "Langford"),
+            ("Lorenz", "Aizawa", "Sprott B", "Thomas", "Dadras", "Chen", "Langford", "Rossler", "Halvorsen"),
         )
+
+    def test_active_placards_use_attractor_specific_medium_descriptions(self) -> None:
+        manager = self.make_manager()
+        expected_media = {
+            "Lorenz": "Atmospheric convection model,\ndissipative chaotic flow",
+            "Aizawa": "Autonomous nonlinear flow,\ntoroidal strange attractor",
+            "Sprott B": "Minimal quadratic flow,\nSprott class-B chaos",
+            "Thomas": "Cyclically symmetric flow,\nthree coupled sine states",
+            "Dadras": "Polynomial chaotic flow,\nstate-multiplying feedback",
+            "Chen": "Lorenz-family chaotic flow,\nquadratic dissipative system",
+            "Langford": "Torus-breakdown oscillator,\nfolded nonlinear flow",
+            "Rossler": "Single-scroll spiral flow,\ncontinuous-time oscillator",
+            "Halvorsen": "Symmetric quadratic flow,\nthree-lobed chaotic system",
+        }
+
+        for index, name in enumerate(manager.names):
+            manager.switch_to(index)
+            self.assertEqual(manager.placard.medium, expected_media[name])
+
+    def test_active_placards_include_attractor_equations(self) -> None:
+        manager = self.make_manager()
+        expected_equations = {
+            "Lorenz": "xdot = sigma(y - x)\nydot = x(rho - z) - y\nzdot = x*y - beta*z",
+            "Aizawa": "xdot = (z - b)*x - d*y\nydot = d*x + (z - b)*y\nzdot = c + a*z - z^3/3 -\n(x^2 + y^2)(1 + e*z) + f*z*x^3",
+            "Sprott B": "xdot = a*y*z\nydot = x - b*y\nzdot = 1 - x*y",
+            "Thomas": "xdot = sin(y) - b*x\nydot = sin(z) - b*y\nzdot = sin(x) - b*z",
+            "Dadras": "xdot = y - p*x + q*y*z\nydot = r*y - x*z + z\nzdot = c*x*y - e*z",
+            "Chen": "xdot = a(y - x)\nydot = (c - a)*x - x*z + c*y\nzdot = x*y - b*z",
+            "Langford": "xdot = (z - beta)*x - omega*y\nydot = omega*x + (z - beta)*y\nzdot = lambda + alpha*z - z^3/3 -\n(x^2 + y^2)(1 + rho*z) + epsilon*z*x^3",
+            "Rossler": "xdot = -(y + z)\nydot = x + a*y\nzdot = b + z(x - c)",
+            "Halvorsen": "xdot = -a*x - 4*y - 4*z - y^2\nydot = -a*y - 4*z - 4*x - z^2\nzdot = -a*z - 4*x - 4*y - x^2",
+        }
+
+        for index, name in enumerate(manager.names):
+            manager.switch_to(index)
+            self.assertEqual(manager.placard.equation, expected_equations[name])
 
     def test_manager_projection_shapes_are_stable(self) -> None:
         manager = self.make_manager()
@@ -92,6 +132,14 @@ class AttractorTests(unittest.TestCase):
         samples = attractor.sample_points(32, dt=0.005, burn_in=64)
         self.assertEqual(samples.shape, (32, 3))
         self.assertTrue(np.isfinite(samples).all())
+
+    def test_dadras_default_seed_enters_full_3d_motion(self) -> None:
+        attractor = DadrasAttractor()
+        samples = attractor.fill_samples(0.005, 512)
+
+        self.assertTrue(np.isfinite(samples).all())
+        self.assertGreater(float(np.std(samples[:, 1])), 1e-3)
+        self.assertGreater(float(np.std(samples[:, 2])), 1e-3)
 
     def test_prime_current_trail_fills_large_buffer_and_advances_state(self) -> None:
         manager = self.make_manager(capacity=1024)

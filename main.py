@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> None:
     animation_time = 0.0
     last_frame_time = time.perf_counter()
     active_slider: str | None = None
-    left_switch_caption_until = 0.0
+    left_reset_caption_until = 0.0
     right_switch_caption_until = 0.0
 
     try:
@@ -385,12 +385,12 @@ def main(argv: list[str] | None = None) -> None:
                 controls.set_target("zoom", gesture_frame.scale)
             if gesture_frame.trail_len is not None:
                 controls.trail_len = max(MIN_TRAIL, min(MAX_TRAIL, int(round(gesture_frame.trail_len))))
+            if gesture_frame.reset_current:
+                left_reset_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
+                _restart_current_trail(manager)
             if gesture_frame.scene_delta:
                 switch_now = time.monotonic()
-                if gesture_frame.scene_delta < 0:
-                    left_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
-                else:
-                    right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
+                right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
                 manager.switch_relative(gesture_frame.scene_delta)
                 _prime_live_trail(manager)
 
@@ -400,8 +400,8 @@ def main(argv: list[str] | None = None) -> None:
                 manager.step_many(DEFAULT_DT * controls.speed, _steps_for_speed(controls.speed))
             positions, ages = manager.get_render_data(controls.trail_len)
             caption_now = time.monotonic()
-            left_pip_caption = "Previous" if caption_now < left_switch_caption_until else "Speed"
-            right_pip_caption = "Next" if caption_now < right_switch_caption_until else "Scale"
+            left_pip_caption = "Reset" if caption_now < left_reset_caption_until else "Speed"
+            right_pip_caption = "Switch" if caption_now < right_switch_caption_until else "Scale"
 
             renderer.draw(
                 SceneState(
@@ -416,6 +416,7 @@ def main(argv: list[str] | None = None) -> None:
                     placard_title=manager.placard.title,
                     placard_year=manager.placard.year,
                     placard_medium=manager.placard.medium,
+                    placard_equation=manager.placard.equation,
                     placard_params=manager.placard.params,
                     yaw=controls.yaw,
                     pitch=controls.pitch,

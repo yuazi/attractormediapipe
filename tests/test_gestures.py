@@ -45,13 +45,13 @@ class GestureTests(unittest.TestCase):
 
         self.assertIn("Thumb + index pinch -> Speed", left_section)
         self.assertIn("Thumb + ring pinch -> Luminosity", left_section)
-        self.assertIn("Pinky touch palm -> Previous attractor", left_section)
+        self.assertIn("Pinky touch palm -> Reset attractor", left_section)
         self.assertIn("Palm X -> Yaw", right_section)
         self.assertIn("Palm Y -> Pitch", right_section)
         self.assertIn("Thumb + index pinch -> Scale / zoom", right_section)
         self.assertIn("Thumb + ring pinch -> Trail length", right_section)
-        self.assertIn("Pinky touch palm -> Next attractor", right_section)
-        self.assertTrue(any("[1-7] switch" in line for line in keys_section))
+        self.assertIn("Pinky touch palm -> Switch attractor", right_section)
+        self.assertTrue(any("[1-9] switch" in line for line in keys_section))
 
     def test_left_hand_controls_speed_and_ring_pinch_luminosity_while_right_controls_rotation_and_scale(self) -> None:
         interpreter = GestureInterpreter()
@@ -72,6 +72,7 @@ class GestureTests(unittest.TestCase):
         self.assertGreater(frame.scale, 0.3)
         self.assertGreater(frame.trail_len, MIN_TRAIL)
         self.assertAlmostEqual(frame.speed, SPEED_RANGE[1])
+        self.assertFalse(frame.reset_current)
         self.assertEqual(frame.scene_delta, 0)
 
     def test_left_hand_thumb_ring_pinch_controls_luminosity(self) -> None:
@@ -126,7 +127,7 @@ class GestureTests(unittest.TestCase):
         self.assertLessEqual(long_frame.trail_len, MAX_TRAIL)
         self.assertAlmostEqual(short_frame.scale, long_frame.scale)
 
-    def test_pinky_touch_switches_scene_by_hand(self) -> None:
+    def test_left_pinky_resets_and_right_pinky_switches(self) -> None:
         interpreter = GestureInterpreter()
         left_trigger = make_hand(
             0.50,
@@ -144,10 +145,19 @@ class GestureTests(unittest.TestCase):
             pinky_tip=(0.82, 0.26),
         )
 
-        self.assertEqual(interpreter.update({"left": left_trigger, "right": None}, now=0.10).scene_delta, -1)
-        self.assertEqual(interpreter.update({"left": left_trigger, "right": None}, now=0.20).scene_delta, 0)
-        self.assertEqual(interpreter.update({"left": release, "right": None}, now=0.30).scene_delta, 0)
-        self.assertEqual(interpreter.update({"left": None, "right": right_trigger}, now=0.90).scene_delta, 1)
+        first_left = interpreter.update({"left": left_trigger, "right": None}, now=0.10)
+        second_left = interpreter.update({"left": left_trigger, "right": None}, now=0.20)
+        released_left = interpreter.update({"left": release, "right": None}, now=0.30)
+        right_frame = interpreter.update({"left": None, "right": right_trigger}, now=0.90)
+
+        self.assertTrue(first_left.reset_current)
+        self.assertEqual(first_left.scene_delta, 0)
+        self.assertFalse(second_left.reset_current)
+        self.assertEqual(second_left.scene_delta, 0)
+        self.assertFalse(released_left.reset_current)
+        self.assertEqual(released_left.scene_delta, 0)
+        self.assertFalse(right_frame.reset_current)
+        self.assertEqual(right_frame.scene_delta, 1)
 
     def test_right_hand_motion_does_not_switch_scene(self) -> None:
         interpreter = GestureInterpreter()
@@ -160,7 +170,7 @@ class GestureTests(unittest.TestCase):
 
         self.assertEqual(deltas, [0, 0, 0, 0, 0])
 
-    def test_scene_turn_rearms_when_pinky_leaves_palm(self) -> None:
+    def test_left_reset_rearms_when_pinky_leaves_palm(self) -> None:
         interpreter = GestureInterpreter()
         trigger = make_hand(
             0.50,
@@ -176,7 +186,8 @@ class GestureTests(unittest.TestCase):
         interpreter.update({"left": trigger, "right": None}, now=0.0)
         interpreter.update({"left": release, "right": None}, now=0.1)
         frame = interpreter.update({"left": trigger, "right": None}, now=0.7)
-        self.assertEqual(frame.scene_delta, -1)
+        self.assertTrue(frame.reset_current)
+        self.assertEqual(frame.scene_delta, 0)
 
 
 if __name__ == "__main__":
