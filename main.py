@@ -198,6 +198,10 @@ def _adjust_zoom(controls: ControlState, factor: float) -> None:
     controls.set_target("zoom", max(SCALE_RANGE[0], min(SCALE_RANGE[1], controls._targets["zoom"] * factor)))
 
 
+def _steps_for_speed(speed: float) -> int:
+    return max(1, int(round(STEPS_PER_FRAME * max(SPEED_RANGE[0], speed))))
+
+
 def _apply_slider_control(controls: ControlState, slider_id: str, value: float) -> None:
     if slider_id == "speed":
         controls.set_target("speed", value)
@@ -237,6 +241,19 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
     return output
 
 
+def _prime_live_trail(manager: AttractorManager) -> None:
+    manager.prime_current_trail(
+        dt=DEFAULT_DT,
+        sample_count=SNAPSHOT_SAMPLES,
+        burn_in=SNAPSHOT_BURN_IN,
+        sample_stride=SNAPSHOT_SAMPLE_STRIDE,
+    )
+
+
+def _restart_current_trail(manager: AttractorManager) -> None:
+    manager.reset()
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if args.snapshot_only or (args.headless and args.screenshot_path):
@@ -261,6 +278,7 @@ def main(argv: list[str] | None = None) -> None:
         except KeyError as exc:
             renderer.quit()
             raise SystemExit(f"Unknown active attractor '{args.attractor}'") from exc
+    _prime_live_trail(manager)
 
     camera_session = maybe_create_camera_session(args)
     camera_frame = None
@@ -289,7 +307,7 @@ def main(argv: list[str] | None = None) -> None:
                     elif event.key == pygame.K_SPACE:
                         controls.paused = not controls.paused
                     elif event.key == pygame.K_r:
-                        manager.reset_all()
+                        _restart_current_trail(manager)
                     elif event.key == pygame.K_s:
                         snapshotter.start(
                             SnapshotRequest(
@@ -311,6 +329,7 @@ def main(argv: list[str] | None = None) -> None:
                         controls.focus_mode = not controls.focus_mode
                     elif pygame.K_1 <= event.key < pygame.K_1 + manager.total:
                         manager.switch_to(event.key - pygame.K_1)
+                        _prime_live_trail(manager)
                     elif event.key == pygame.K_UP:
                         _adjust_speed(controls, 0.1)
                     elif event.key == pygame.K_DOWN:
@@ -325,7 +344,11 @@ def main(argv: list[str] | None = None) -> None:
                     and controls.show_overlay
                     and not controls.focus_mode
                 ):
-                    active_slider = renderer.control_hit_test(manager.names, event.pos)
+                    if renderer.reset_button_hit_test(manager.names, event.pos):
+                        active_slider = None
+                        _restart_current_trail(manager)
+                    else:
+                        active_slider = renderer.control_hit_test(manager.names, event.pos)
                     if active_slider is not None:
                         slider_value = renderer.control_value_for_position(manager.names, active_slider, event.pos[0])
                         _apply_slider_control(controls, active_slider, slider_value)
@@ -369,11 +392,12 @@ def main(argv: list[str] | None = None) -> None:
                 else:
                     right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
                 manager.switch_relative(gesture_frame.scene_delta)
+                _prime_live_trail(manager)
 
             controls.smooth()
 
             if not controls.paused:
-                manager.step_many(DEFAULT_DT * controls.speed, STEPS_PER_FRAME)
+                manager.step_many(DEFAULT_DT * controls.speed, _steps_for_speed(controls.speed))
             positions, ages = manager.get_render_data(controls.trail_len)
             caption_now = time.monotonic()
             left_pip_caption = "Previous" if caption_now < left_switch_caption_until else "Speed"
@@ -400,7 +424,7 @@ def main(argv: list[str] | None = None) -> None:
                     speed=controls.speed,
                     luminosity=controls.luminosity,
                     trail_len=controls.trail_len,
-                    point_count=len(positions),
+                    point_count=manager.count,
                     fps=renderer.clock.get_fps(),
                     paused=controls.paused,
                     exporting=snapshotter.is_running,

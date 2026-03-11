@@ -15,6 +15,9 @@ from attractors.thomas import ThomasAttractor
 
 
 class AttractorTests(unittest.TestCase):
+    def make_manager(self, capacity: int = 4096) -> AttractorManager:
+        return AttractorManager(capacity=capacity)
+
     def test_each_active_attractor_steps_without_nan(self) -> None:
         attractors = [
             LorenzAttractor(),
@@ -32,7 +35,7 @@ class AttractorTests(unittest.TestCase):
                 self.assertTrue(np.isfinite(point).all(), attractor.name)
 
     def test_manager_exposes_seven_active_attractors(self) -> None:
-        manager = AttractorManager()
+        manager = self.make_manager()
         self.assertEqual(manager.total, 7)
         self.assertEqual(
             manager.names,
@@ -40,7 +43,7 @@ class AttractorTests(unittest.TestCase):
         )
 
     def test_manager_projection_shapes_are_stable(self) -> None:
-        manager = AttractorManager()
+        manager = self.make_manager()
         manager.step_many(0.005, 64)
         points_2d, depths = manager.get_projected_trail(48, 25.0, -10.0, 5.0, 1.4, (1280, 720))
         self.assertEqual(points_2d.shape, (48, 2))
@@ -49,7 +52,7 @@ class AttractorTests(unittest.TestCase):
         self.assertTrue(np.isfinite(depths).all())
 
     def test_switching_resets_selected_attractor_trail(self) -> None:
-        manager = AttractorManager()
+        manager = self.make_manager()
         manager.step_many(0.005, 12)
         self.assertGreater(manager.count, 0)
         manager.switch_to(3)
@@ -60,7 +63,7 @@ class AttractorTests(unittest.TestCase):
         self.assertEqual(manager.count, 0)
 
     def test_reset_all_clears_all_trails(self) -> None:
-        manager = AttractorManager()
+        manager = self.make_manager()
         for _ in range(manager.total):
             manager.step_many(0.005, 8)
             manager.switch_relative(1)
@@ -68,7 +71,7 @@ class AttractorTests(unittest.TestCase):
         self.assertTrue(all(manager.get_recent_trail(index=index).size == 0 for index in range(manager.total)))
 
     def test_render_data_and_normalization_helpers(self) -> None:
-        manager = AttractorManager()
+        manager = self.make_manager()
         manager.step_many(0.005, 96)
         render_points, ages = manager.get_render_data(64)
         self.assertEqual(render_points.shape, (64, 3))
@@ -89,6 +92,17 @@ class AttractorTests(unittest.TestCase):
         samples = attractor.sample_points(32, dt=0.005, burn_in=64)
         self.assertEqual(samples.shape, (32, 3))
         self.assertTrue(np.isfinite(samples).all())
+
+    def test_prime_current_trail_fills_large_buffer_and_advances_state(self) -> None:
+        manager = self.make_manager(capacity=1024)
+        initial_state = manager.state_vector
+        manager.prime_current_trail(dt=0.005, sample_count=512, burn_in=128)
+        self.assertEqual(manager.count, 512)
+        self.assertEqual(manager.get_recent_trail().shape, (512, 3))
+        self.assertNotEqual(manager.state_vector, initial_state)
+        render_points, ages = manager.get_render_data(64)
+        self.assertEqual(render_points.shape, (64, 3))
+        self.assertEqual(ages.shape, (64,))
 
 
 if __name__ == "__main__":

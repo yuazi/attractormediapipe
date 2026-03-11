@@ -159,11 +159,18 @@ class AttractorManager:
     def __init__(self, capacity: int = TRAIL_BUFFER_CAPACITY) -> None:
         self.capacity = capacity
         self.attractors = [attractor_type() for attractor_type in ACTIVE_ATTRACTOR_TYPES]
-        self._trails = [np.zeros((capacity, 3), dtype=np.float32) for _ in self.attractors]
+        self._trails: list[np.ndarray | None] = [None for _ in self.attractors]
         self._counts = np.zeros(len(self.attractors), dtype=np.int32)
         self._heads = np.zeros(len(self.attractors), dtype=np.int32)
         self.index = 0
         self.zoom = DEFAULT_SCALE
+
+    def _ensure_trail(self, index: int) -> np.ndarray:
+        trail = self._trails[index]
+        if trail is None:
+            trail = np.zeros((self.capacity, 3), dtype=np.float32)
+            self._trails[index] = trail
+        return trail
 
     @property
     def current(self):
@@ -241,7 +248,9 @@ class AttractorManager:
         target_index = self.index if index is None else max(0, min(index, self.total - 1))
         self._counts[target_index] = 0
         self._heads[target_index] = 0
-        self._trails[target_index].fill(0.0)
+        trail = self._trails[target_index]
+        if trail is not None:
+            trail.fill(0.0)
 
     def switch_to(self, index: int) -> None:
         new_index = max(0, min(index, self.total - 1))
@@ -264,13 +273,34 @@ class AttractorManager:
         self._append_points(self.index, samples)
         return samples
 
+    def prime_current_trail(self, *, sample_count: int | None = None, dt: float, burn_in: int = 0, sample_stride: int = 1) -> np.ndarray:
+        count = self.capacity if sample_count is None else max(0, min(int(sample_count), self.capacity))
+        if count <= 0:
+            self.clear_trail(self.index)
+            return np.empty((0, 3), dtype=np.float32)
+
+        trail = self._ensure_trail(self.index)
+        if count != self.capacity:
+            trail[:count].fill(0.0)
+        self.current.sample_points(
+            count,
+            dt=dt,
+            burn_in=burn_in,
+            sample_stride=sample_stride,
+            out=trail[:count],
+            update_state=True,
+        )
+        self._heads[self.index] = count % self.capacity
+        self._counts[self.index] = count
+        return trail[:count]
+
     def _append_points(self, index: int, points: np.ndarray) -> None:
         if len(points) == 0:
             return
         head = int(self._heads[index])
         count = len(points)
         first_chunk = min(self.capacity - head, count)
-        trail = self._trails[index]
+        trail = self._ensure_trail(index)
         trail[head:head + first_chunk] = points[:first_chunk]
         remaining = count - first_chunk
         if remaining > 0:
@@ -281,13 +311,13 @@ class AttractorManager:
     def get_recent_trail(self, limit: int | None = None, *, index: int | None = None) -> np.ndarray:
         target_index = self.index if index is None else max(0, min(index, self.total - 1))
         count = int(self._counts[target_index])
-        if count == 0:
+        trail = self._trails[target_index]
+        if count == 0 or trail is None:
             return np.empty((0, 3), dtype=np.float32)
 
         take = count if limit is None else min(limit, count)
         head = int(self._heads[target_index])
         start = (head - take) % self.capacity
-        trail = self._trails[target_index]
         if start < head and take == head - start:
             return trail[start:head].copy()
         indices = (np.arange(take, dtype=np.int32) + start) % self.capacity

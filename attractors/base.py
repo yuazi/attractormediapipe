@@ -106,6 +106,7 @@ class Attractor(ABC):
         sample_stride: int = 1,
         out: np.ndarray | None = None,
         initial_state: Iterable[float] | None = None,
+        update_state: bool = False,
     ) -> np.ndarray:
         if self.kernel_sample is None:
             raise NotImplementedError(f"{self.__class__.__name__} is missing kernel_sample")
@@ -114,7 +115,7 @@ class Attractor(ABC):
 
         start_state = tuple(initial_state) if initial_state is not None else tuple(float(value) for value in self.state)
         buffer = out if out is not None else np.empty((count, 3), dtype=np.float32)
-        self.kernel_sample(
+        end_x, end_y, end_z = self.kernel_sample(
             buffer,
             float(start_state[0]),
             float(start_state[1]),
@@ -124,4 +125,8 @@ class Attractor(ABC):
             int(sample_stride),
             *self.kernel_params(),
         )
+        if update_state:
+            self.state[0] = end_x
+            self.state[1] = end_y
+            self.state[2] = end_z
         return buffer

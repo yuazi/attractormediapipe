@@ -144,6 +144,7 @@ CONTROL_SLIDERS = (
     ("luminosity", LUMINOSITY_RANGE),
     ("scale", SCALE_RANGE),
 )
+RESET_TRAIL_ACTION = "reset_trail"
 
 
 @dataclass
@@ -389,7 +390,7 @@ class SceneRenderer:
         return x, y, spacing, max_width
 
     def _draw_control_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, accent: tuple[int, int, int]) -> None:
-        panel_rect, track_rects = self._control_panel_layout(state.attractor_names)
+        panel_rect, track_rects, button_rect = self._control_panel_layout(state.attractor_names)
         panel_x, panel_y, panel_right, panel_bottom = panel_rect
         panel_width = panel_right - panel_x
         panel_height = panel_bottom - panel_y
@@ -419,6 +420,7 @@ class SceneRenderer:
                 active=state.active_slider == slider_id,
             )
 
+        self._draw_action_button(draw, button_rect, "Reset trail", accent)
         status = "paused" if state.paused else "exporting..." if state.exporting else state.export_message or "live"
         status_fill = accent if not state.paused else HUD_BAR_FILL
         draw.text((panel_x + 18, panel_y + panel_height - 24), status, font=self._font_mono_small, fill=status_fill)
@@ -430,6 +432,7 @@ class SceneRenderer:
         help_lines = [
             "Overlay helper",
             "1-7 switch attractor",
+            "R restart trail growth",
             "SPACE pause or resume",
             "S save 4K snapshot",
             "Mouse wheel zoom",
@@ -485,12 +488,31 @@ class SceneRenderer:
         knob_fill = accent if active else HUD_BAR_FILL
         draw.ellipse((fill_end - knob_radius, track_y - knob_radius, fill_end + knob_radius, track_y + knob_radius), fill=knob_fill)
 
-    def _control_panel_layout(self, attractor_names: Sequence[str]) -> tuple[tuple[int, int, int, int], dict[str, tuple[int, int, int, int]]]:
+    def _draw_action_button(
+        self,
+        draw: ImageDraw.ImageDraw,
+        rect: tuple[int, int, int, int],
+        label: str,
+        accent: tuple[int, int, int],
+    ) -> None:
+        left, top, right, bottom = rect
+        fill = (*HUD_BAR_BG, 255)
+        border = (*accent, 255)
+        draw.rounded_rectangle((left, top, right, bottom), radius=12, fill=fill, outline=border, width=1)
+        label_w = self._text_width(label, self._font_mono_small)
+        label_x = left + max(0, (right - left - label_w) // 2)
+        label_y = top + max(0, (bottom - top - 14) // 2)
+        draw.text((label_x, label_y), label, font=self._font_mono_small, fill=HUD_TEXT)
+
+    def _control_panel_layout(
+        self,
+        attractor_names: Sequence[str],
+    ) -> tuple[tuple[int, int, int, int], dict[str, tuple[int, int, int, int]], tuple[int, int, int, int]]:
         labels = [f"figure. {idx + 1}" for idx in range(len(attractor_names))]
         max_width = max(self._text_width(label, self._font_serif) for label in labels) if labels else 0
         nav_x = self.width - 54 - max_width
         panel_width = 310
-        panel_height = 210
+        panel_height = 252
         panel_gap = 34
         panel_x = max(48, nav_x - panel_gap - panel_width)
         panel_y = 60
@@ -503,10 +525,11 @@ class SceneRenderer:
             track_bottom = track_top + 10
             track_rects[slider_id] = (track_left, track_top, track_right, track_bottom)
             row_y += 38
-        return (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), track_rects
+        button_rect = (panel_x + 18, panel_y + 192, panel_x + panel_width - 18, panel_y + 224)
+        return (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), track_rects, button_rect
 
     def control_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> Optional[str]:
-        panel_rect, track_rects = self._control_panel_layout(attractor_names)
+        panel_rect, track_rects, _button_rect = self._control_panel_layout(attractor_names)
         x, y = position
         if not (panel_rect[0] <= x <= panel_rect[2] and panel_rect[1] <= y <= panel_rect[3]):
             return None
@@ -515,8 +538,13 @@ class SceneRenderer:
                 return slider_id
         return None
 
+    def reset_button_hit_test(self, attractor_names: Sequence[str], position: tuple[int, int]) -> bool:
+        _panel_rect, _track_rects, button_rect = self._control_panel_layout(attractor_names)
+        x, y = position
+        return button_rect[0] <= x <= button_rect[2] and button_rect[1] <= y <= button_rect[3]
+
     def control_value_for_position(self, attractor_names: Sequence[str], slider_id: str, x_position: int) -> float:
-        _panel_rect, track_rects = self._control_panel_layout(attractor_names)
+        _panel_rect, track_rects, _button_rect = self._control_panel_layout(attractor_names)
         left, _top, right, _bottom = track_rects[slider_id]
         minimum, maximum = dict(CONTROL_SLIDERS)[slider_id]
         ratio = 0.0 if right <= left else max(0.0, min(1.0, (x_position - left) / (right - left)))

@@ -60,7 +60,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 
 - `ESC`: quit
 - `SPACE`: pause / resume
-- `R`: reset all attractors and clear all trails
+- `R`: restart the current attractor from an empty trail so you can watch it grow again
 - `S`: export a 4K Datashader snapshot of the current attractor
 - `H`: toggle overlay
 - `C`: toggle camera PiP
@@ -70,6 +70,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 - `LEFT` / `RIGHT`: adjust visible trail length
 - Mouse wheel: zoom
 - Left mouse drag on overlay sliders: adjust speed, trail length, luminosity, and zoom
+- Click `Reset trail` in the parameter panel: restart the current attractor from zero visible history
 
 ## UI notes
 
