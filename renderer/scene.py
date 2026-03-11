@@ -181,6 +181,8 @@ class SceneState:
     pip_frame: Optional[np.ndarray]
     left_landmarks: Optional[Sequence[tuple[float, float, float]]]
     right_landmarks: Optional[Sequence[tuple[float, float, float]]]
+    left_pip_caption: str
+    right_pip_caption: str
     time_value: float
 
 
@@ -338,7 +340,13 @@ class SceneRenderer:
         if state.show_overlay and not state.focus_mode:
             self._draw_overlay(state)
         if (state.show_camera or state.focus_mode) and state.pip_frame is not None:
-            self._draw_camera_frame(state.pip_frame, state.left_landmarks, state.right_landmarks)
+            self._draw_camera_frame(
+                state.pip_frame,
+                state.left_landmarks,
+                state.right_landmarks,
+                state.left_pip_caption,
+                state.right_pip_caption,
+            )
 
     def _draw_overlay(self, state: SceneState) -> None:
         image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
@@ -574,6 +582,8 @@ class SceneRenderer:
         frame_bgr: np.ndarray,
         left_landmarks: Optional[Sequence[tuple[float, float, float]]],
         right_landmarks: Optional[Sequence[tuple[float, float, float]]],
+        left_caption: str,
+        right_caption: str,
     ) -> None:
         if self._cv2 is None:
             try:
@@ -590,9 +600,9 @@ class SceneRenderer:
         if left_landmarks or right_landmarks:
             overlay = pygame.Surface((PIP_W, PIP_H), pygame.SRCALPHA)
             if left_landmarks:
-                draw_hand_skeleton(overlay, left_landmarks, PIP_W, PIP_H, caption="Speed")
+                draw_hand_skeleton(overlay, left_landmarks, PIP_W, PIP_H, caption=left_caption)
             if right_landmarks:
-                draw_hand_skeleton(overlay, right_landmarks, PIP_W, PIP_H, caption="Scale")
+                draw_hand_skeleton(overlay, right_landmarks, PIP_W, PIP_H, caption=right_caption)
             overlay_rgba = pygame.image.tobytes(overlay, "RGBA")
             overlay_rgba = np.frombuffer(overlay_rgba, dtype=np.uint8).reshape(PIP_H, PIP_W, 4)
             alpha = overlay_rgba[:, :, 3:4].astype(np.float32) / 255.0

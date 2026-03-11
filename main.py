@@ -31,6 +31,8 @@ from config import (
 )
 from hands import GestureInterpreter
 
+SWITCH_CAPTION_DURATION = 0.85
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ModernGL strange attractor trail viewer")
@@ -267,6 +269,8 @@ def main(argv: list[str] | None = None) -> None:
     animation_time = 0.0
     last_frame_time = time.perf_counter()
     active_slider: str | None = None
+    left_switch_caption_until = 0.0
+    right_switch_caption_until = 0.0
 
     try:
         while running:
@@ -359,6 +363,11 @@ def main(argv: list[str] | None = None) -> None:
                 if gesture_frame.scale is not None:
                     controls.set_target("zoom", gesture_frame.scale)
             if gesture_frame.scene_delta:
+                switch_now = time.monotonic()
+                if gesture_frame.scene_delta < 0:
+                    left_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
+                else:
+                    right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
                 manager.switch_relative(gesture_frame.scene_delta)
 
             controls.smooth()
@@ -366,6 +375,9 @@ def main(argv: list[str] | None = None) -> None:
             if not controls.paused:
                 manager.step_many(DEFAULT_DT * controls.speed, STEPS_PER_FRAME)
             positions, ages = manager.get_render_data(controls.trail_len)
+            caption_now = time.monotonic()
+            left_pip_caption = "Previous" if caption_now < left_switch_caption_until else "Speed"
+            right_pip_caption = "Next" if caption_now < right_switch_caption_until else "Scale"
 
             renderer.draw(
                 SceneState(
@@ -402,6 +414,8 @@ def main(argv: list[str] | None = None) -> None:
                     pip_frame=camera_frame,
                     left_landmarks=hand_data["left"],
                     right_landmarks=hand_data["right"],
+                    left_pip_caption=left_pip_caption,
+                    right_pip_caption=right_pip_caption,
                     time_value=animation_time,
                 )
             )

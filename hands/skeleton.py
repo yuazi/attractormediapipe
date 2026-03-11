@@ -17,6 +17,7 @@ HAND_CONNECTIONS = (
 
 _FONT_CACHE: dict[int, ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 _TEXT_CACHE: dict[tuple[str, Tuple[int, int, int], int], pygame.Surface] = {}
+_SWITCH_CAPTIONS = {"Next", "Previous"}
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -32,6 +33,17 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _palm_center_pixels(
+    landmarks: Sequence[Tuple[float, float, float]],
+    width: int,
+    height: int,
+) -> tuple[int, int]:
+    palm_indices = (0, 5, 9, 13, 17)
+    center_x = sum(landmarks[idx][0] for idx in palm_indices) / len(palm_indices)
+    center_y = sum(landmarks[idx][1] for idx in palm_indices) / len(palm_indices)
+    return int(center_x * width), int(center_y * height)
 
 
 def _render_text(text: str, color: Tuple[int, int, int], size: int) -> pygame.Surface:
@@ -66,7 +78,7 @@ def draw_hand_skeleton(
         return
 
     scale = max(1.0, min(width / 320.0, height / 180.0))
-    line_width = max(2, int(round(4 * scale)))
+    line_width = max(1, int(round(2 * scale)))
     point_radius = max(4, int(round(6 * scale)))
     shadow_radius = point_radius + max(2, int(round(4 * scale)))
     font_size = max(15, int(round(21 * scale)))
@@ -75,7 +87,7 @@ def draw_hand_skeleton(
     thumb_tip = (int(landmarks[4][0] * width), int(landmarks[4][1] * height))
     index_tip = (int(landmarks[8][0] * width), int(landmarks[8][1] * height))
     glow_color = (*color, 70)
-    pygame.draw.line(surface, glow_color, thumb_tip, index_tip, line_width + max(2, int(round(5 * scale))))
+    pygame.draw.line(surface, glow_color, thumb_tip, index_tip, line_width + max(1, int(round(2 * scale))))
     pygame.draw.line(surface, color, thumb_tip, index_tip, line_width)
     pygame.draw.circle(surface, glow_color, thumb_tip, shadow_radius)
     pygame.draw.circle(surface, glow_color, index_tip, shadow_radius)
@@ -86,11 +98,19 @@ def draw_hand_skeleton(
         return
 
     text_surface = _render_text(caption, color, font_size)
-    anchor_x = (thumb_tip[0] + index_tip[0]) // 2
-    anchor_y = (thumb_tip[1] + index_tip[1]) // 2
-    place_right = anchor_x < width * 0.5
-    text_x = anchor_x + text_gap if place_right else anchor_x - text_surface.get_width() - text_gap
-    text_y = anchor_y - text_surface.get_height() // 2
+    if caption in _SWITCH_CAPTIONS and len(landmarks) >= 21:
+        pinky_tip = (int(landmarks[20][0] * width), int(landmarks[20][1] * height))
+        palm_center = _palm_center_pixels(landmarks, width, height)
+        anchor_x = int((pinky_tip[0] * 0.6) + (palm_center[0] * 0.4))
+        anchor_y = int((pinky_tip[1] * 0.6) + (palm_center[1] * 0.4))
+        text_x = anchor_x - text_surface.get_width() // 2
+        text_y = anchor_y - text_surface.get_height() // 2
+    else:
+        anchor_x = (thumb_tip[0] + index_tip[0]) // 2
+        anchor_y = (thumb_tip[1] + index_tip[1]) // 2
+        place_right = anchor_x < width * 0.5
+        text_x = anchor_x + text_gap if place_right else anchor_x - text_surface.get_width() - text_gap
+        text_y = anchor_y - text_surface.get_height() // 2
     text_x = int(_clamp(text_x, 8, width - text_surface.get_width() - 8))
     text_y = int(_clamp(text_y, 8, height - text_surface.get_height() - 8))
     surface.blit(text_surface, (text_x, text_y))
