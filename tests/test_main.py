@@ -92,6 +92,38 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_run_snapshot_export_forwards_snapshot_dimensions(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        captured = {}
+
+        def fake_export(request):
+            captured["request"] = request
+            return "/tmp/wallpaper.png"
+
+        args = module.parse_args(
+            [
+                "--snapshot-only",
+                "--attractor",
+                "Lorenz",
+                "--snapshot-width",
+                "7680",
+                "--snapshot-height",
+                "4320",
+            ]
+        )
+
+        with mock.patch("renderer.export_attractor_snapshot", side_effect=fake_export):
+            with mock.patch("builtins.print"):
+                result = module.run_snapshot_export(args)
+
+        self.assertEqual(result, "/tmp/wallpaper.png")
+        self.assertEqual(captured["request"].width, 7680)
+        self.assertEqual(captured["request"].height, 4320)
+
+        sys.modules.pop("main", None)
+
     def test_maybe_create_camera_session_disables_camera_when_tracker_init_fails(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")

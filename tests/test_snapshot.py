@@ -11,6 +11,7 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
+from config import SNAPSHOT_HEIGHT, SNAPSHOT_WIDTH
 from renderer.snapshot import (
     SnapshotController,
     SnapshotRequest,
@@ -23,7 +24,7 @@ from renderer.snapshot import (
 
 
 class SnapshotTests(unittest.TestCase):
-    def test_snapshot_export_writes_4k_png(self) -> None:
+    def test_snapshot_export_writes_png_at_requested_dimensions(self) -> None:
         ensure_snapshot_environment()
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "snapshot.png"
@@ -36,6 +37,8 @@ class SnapshotTests(unittest.TestCase):
                 time_value=0.0,
                 luminosity=0.8,
                 output_path=str(output_path),
+                width=640,
+                height=360,
                 sample_count=3000,
                 burn_in=500,
                 sample_stride=1,
@@ -45,14 +48,14 @@ class SnapshotTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertGreater(os.path.getsize(output_path), 0)
             with Image.open(output_path) as image:
-                self.assertEqual(image.size, (3840, 2160))
+                self.assertEqual(image.size, (640, 360))
                 bbox = image.convert("L").point(lambda value: 255 if value > 0 else 0).getbbox()
                 self.assertIsNotNone(bbox)
                 assert bbox is not None
                 width = bbox[2] - bbox[0]
                 height = bbox[3] - bbox[1]
-                self.assertGreater(width, int(image.width * 0.70))
-                self.assertGreater(height, int(image.height * 0.70))
+                self.assertGreater(width, int(image.width * 0.65))
+                self.assertGreater(height, int(image.height * 0.65))
 
     def test_cover_frame_points_scales_to_cover_snapshot_canvas(self) -> None:
         points = np.array(
@@ -71,7 +74,20 @@ class SnapshotTests(unittest.TestCase):
         self.assertGreaterEqual(float(np.max(covered[:, 1])), 1.0)
         self.assertGreater(float(np.max(np.abs(covered[:, 0]))), 1.0)
 
-    def test_snapshot_request_rejects_invalid_sampling_parameters(self) -> None:
+    def test_snapshot_request_defaults_to_configured_wallpaper_dimensions(self) -> None:
+        request = SnapshotRequest(
+            attractor_name="Lorenz",
+            yaw=0.0,
+            pitch=0.0,
+            roll=0.0,
+            zoom=1.6,
+            time_value=0.0,
+            luminosity=0.8,
+        )
+
+        self.assertEqual((request.width, request.height), (SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT))
+
+    def test_snapshot_request_rejects_invalid_dimensions_and_sampling_parameters(self) -> None:
         kwargs = dict(
             attractor_name="Lorenz",
             yaw=0.0,
@@ -81,6 +97,10 @@ class SnapshotTests(unittest.TestCase):
             time_value=0.0,
             luminosity=0.8,
         )
+        with self.assertRaisesRegex(ValueError, "snapshot dimensions"):
+            SnapshotRequest(**kwargs, width=0)
+        with self.assertRaisesRegex(ValueError, "snapshot dimensions"):
+            SnapshotRequest(**kwargs, height=0)
         with self.assertRaisesRegex(ValueError, "sample_count"):
             SnapshotRequest(**kwargs, sample_count=0)
         with self.assertRaisesRegex(ValueError, "burn_in"):

@@ -24,8 +24,10 @@ from config import (
     MAX_SPEED_POINTS_PER_MINUTE,
     SCALE_RANGE,
     SNAPSHOT_BURN_IN,
+    SNAPSHOT_HEIGHT,
     SNAPSHOT_SAMPLE_STRIDE,
     SNAPSHOT_SAMPLES,
+    SNAPSHOT_WIDTH,
     SMOOTH_ALPHA,
     SPEED_RANGE,
 )
@@ -44,6 +46,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--screenshot-path", type=str, default="", help="Output path for snapshot-only or headless export")
     parser.add_argument("--snapshot-only", action="store_true", help="Export a Datashader snapshot and exit")
     parser.add_argument("--attractor", type=str, default="", help="Active attractor name for startup or snapshot export")
+    parser.add_argument("--snapshot-width", type=int, default=None, help=f"Override snapshot export width (default: {SNAPSHOT_WIDTH})")
+    parser.add_argument("--snapshot-height", type=int, default=None, help=f"Override snapshot export height (default: {SNAPSHOT_HEIGHT})")
     parser.add_argument("--snapshot-samples", type=int, default=None, help="Override the default Datashader sample count")
     parser.add_argument("--snapshot-burn-in", type=int, default=None, help="Override the default Datashader burn-in steps")
     parser.add_argument("--snapshot-stride", type=int, default=None, help="Override the default Datashader sample stride")
@@ -239,6 +243,14 @@ def _apply_slider_control(controls: ControlState, slider_id: str, value: float) 
         controls.set_target("zoom", value)
 
 
+def _resolve_snapshot_dimensions(args: argparse.Namespace) -> tuple[int, int]:
+    width = SNAPSHOT_WIDTH if args.snapshot_width is None else args.snapshot_width
+    height = SNAPSHOT_HEIGHT if args.snapshot_height is None else args.snapshot_height
+    if width < 1 or height < 1:
+        raise SystemExit("snapshot dimensions must be >= 1")
+    return width, height
+
+
 def run_snapshot_export(args: argparse.Namespace) -> str:
     from renderer import SnapshotRequest, export_attractor_snapshot
 
@@ -252,6 +264,7 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
     sample_count = SNAPSHOT_SAMPLES if args.snapshot_samples is None else args.snapshot_samples
     burn_in = SNAPSHOT_BURN_IN if args.snapshot_burn_in is None else args.snapshot_burn_in
     sample_stride = SNAPSHOT_SAMPLE_STRIDE if args.snapshot_stride is None else args.snapshot_stride
+    width, height = _resolve_snapshot_dimensions(args)
     try:
         request = SnapshotRequest(
             attractor_name=attractor_name,
@@ -262,6 +275,8 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
             time_value=0.0,
             luminosity=DEFAULT_LUMINOSITY,
             output_path=args.screenshot_path,
+            width=width,
+            height=height,
             sample_count=sample_count,
             burn_in=burn_in,
             sample_stride=sample_stride,
@@ -288,6 +303,7 @@ def _restart_current_trail(manager: AttractorManager) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    snapshot_width, snapshot_height = _resolve_snapshot_dimensions(args)
     if args.snapshot_only or (args.headless and args.screenshot_path):
         run_snapshot_export(args)
         return
@@ -357,6 +373,8 @@ def main(argv: list[str] | None = None) -> None:
                                 zoom=controls.zoom,
                                 time_value=animation_time,
                                 luminosity=controls.luminosity,
+                                width=snapshot_width,
+                                height=snapshot_height,
                                 state=manager.state_vector,
                             )
                         )

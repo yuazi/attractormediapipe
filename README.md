@@ -1,6 +1,6 @@
 # ModernGL Strange Attractor Trail Viewer
 
-Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`, `datashader`, `opencv-python`, and `mediapipe`. The app renders a single active attractor as a glowing additive point trail in real time, keeps gesture-driven attractor switching and reset, and exports 4K density snapshots with Datashader.
+Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`, `datashader`, `opencv-python`, and `mediapipe`. The app renders a single active attractor as a glowing additive point trail in real time, keeps gesture-driven attractor switching and reset, and exports high-resolution density snapshots with Datashader.
 
 ![Lorenz UI preview](assets/readme_lorenz_ui.png)
 
@@ -12,7 +12,7 @@ Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`,
 - Gesture actions: left pinky touch resets the current attractor, right pinky touch switches to the next
 - Grid-based HUD overlay with named study navigation, frosted utility panels, study placard, and live parameter sliders
 - Stylized PiP camera panel with optional live webcam feed and MediaPipe hand tracking overlays
-- 4K Datashader export of the currently active attractor with inferno density coloring
+- High-resolution Datashader export of the currently active attractor with inferno density coloring
 
 ## Install
 
@@ -34,7 +34,7 @@ Disable the webcam and use keyboard + mouse only:
 python3 main.py --no-camera
 ```
 
-Export a 4K snapshot without opening the viewer:
+Export a 5K snapshot without opening the viewer:
 
 ```bash
 python3 main.py --snapshot-only --attractor Langford --screenshot-path assets/langford_snapshot.png
@@ -44,6 +44,12 @@ Headless export is routed to the same Datashader path:
 
 ```bash
 python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapshot.png
+```
+
+Render a larger wallpaper export by overriding the snapshot size:
+
+```bash
+python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --snapshot-height 4320 --screenshot-path assets/langford_wallpaper.png
 ```
 
 ## Controls
@@ -64,7 +70,7 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 - `ESC`: quit
 - `SPACE`: pause / resume
 - `R`: restart the current attractor from an empty trail so you can watch it grow again
-- `S`: export a 4K Datashader snapshot of the current attractor
+- `S`: export a 5K Datashader snapshot of the current attractor
 - `H`: collapse or expand the shortcuts panel
 - `C`: toggle the live camera feed inside the PiP
 - `M`: focus mode, showing only the attractor and camera PiP
@@ -83,7 +89,8 @@ python3 main.py --headless --attractor Chen --screenshot-path assets/chen_snapsh
 ## Snapshot details
 
 - The exporter generates `5,000,000` points for the current attractor.
-- Output resolution is `3840x2160`.
+- Default output resolution is `5120x2880`.
+- Use `--snapshot-width` and `--snapshot-height` to match your wallpaper resolution or aspect ratio.
 - Files are saved as `attractor_YYYYMMDD_HHMMSS.png` unless `--screenshot-path` is provided.
 - The exporter sets `NUMBA_CACHE_DIR` automatically so Datashader works on environments where the default cache path is not writable.
 
