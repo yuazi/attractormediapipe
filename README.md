@@ -12,7 +12,7 @@ Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`,
 - Procedural grain-texture background with subtle live drift and a separate fog veil so attractors stay legible
 - Gesture actions: left pinky touch resets the current attractor, right pinky touch switches to the next
 - Grid-based HUD overlay with named study navigation, frosted utility panels, study placard, and live parameter sliders
-- Stylized PiP camera panel with optional live webcam feed and MediaPipe hand tracking overlays
+- Stylized `400x225` PiP camera panel with optional live webcam feed, `60 fps` capture requests when supported, and MediaPipe hand tracking overlays
 - High-resolution Datashader export of the currently active attractor as paired clean and textured wallpapers
 
 ## Install
@@ -87,7 +87,8 @@ python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --sna
 ## UI notes
 
 - The HUD now uses a three-by-three screen grid: coordinates top-left, `(y)us` title top-center, named study navigator top-right, shortcuts mid-left, parameters mid-right, study placard bottom-left, status bottom-center, and the PiP panel bottom-right.
-- The PiP panel is always present as part of the HUD chrome. When `C` is enabled and a camera feed is available, the live image renders underneath the scanlines, brackets, and recording/status labels.
+- The PiP panel is always present as part of the HUD chrome. It now renders at `400x225`, and when `C` is enabled with a compatible camera, the live image requests up to `60 fps` underneath the scanlines, brackets, and recording/status labels.
+- The PiP hand overlay is intentionally minimal: thumb/index pinch markers and pinky action markers are shown, while ring-pinch gestures still control luminosity and fog without a dedicated ring skeleton marker.
 
 ## Snapshot details
 

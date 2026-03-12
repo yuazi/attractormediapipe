@@ -50,7 +50,7 @@ def _texture_rgba(width: int, height: int, accent: tuple[int, int, int]) -> np.n
 
     for row in range(rows):
         depth_ratio = row / max(1, rows - 1)
-        base_y = height * (0.04 + depth_ratio**1.06 * 0.93)
+        base_y = depth_ratio * (height - 1)
         lateral_scale = width * (0.08 + depth_ratio**1.30 * 0.60)
         height_scale = height * (0.018 + depth_ratio * 0.072)
         world_z = depth_ratio * 8.0
@@ -68,13 +68,15 @@ def _texture_rgba(width: int, height: int, accent: tuple[int, int, int]) -> np.n
 
             ridge = math.sin(lattice_x * 0.86 - world_z * 0.34 + 0.7) * 0.5 + 0.5
             ridge *= math.cos(lattice_x * 0.22 + world_z * 0.58 - 0.2) * 0.5 + 0.5
-            surface = organic_noise * (0.42 + depth_ratio * 0.70) + ridge * (0.14 + depth_ratio * 0.20)
+            ridge_centered = ridge - 0.5
+            surface = organic_noise * (0.42 + depth_ratio * 0.70) + ridge_centered * (0.14 + depth_ratio * 0.20)
 
             vertical_ribbon = math.sin(lattice_x * 1.34 - world_z * 0.92 + 0.9) * height * 0.024
-            suspended = max(0.0, ridge - 0.68) * (1.0 - depth_ratio) * height * 0.14
+            suspended = max(0.0, ridge - 0.68) * (1.0 - depth_ratio) * height * 0.04
+            y_jitter = (rng.random() - 0.5) * height * 0.10
 
             sx = int(round(center_x + swirl + lattice_x * lateral_scale))
-            sy = int(round(base_y - surface * height_scale - vertical_ribbon - suspended))
+            sy = int(round(base_y - surface * height_scale - vertical_ribbon - suspended + y_jitter))
             if sx < 1 or sy < 1 or sx >= width - 1 or sy >= height - 1:
                 continue
 

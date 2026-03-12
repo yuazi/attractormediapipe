@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from attractors import AttractorManager, active_attractor_names
 from config import (
+    CAMERA_CAPTURE_FPS,
     CAMERA_FRAME_HEIGHT,
     CAMERA_FRAME_WIDTH,
     DEFAULT_DT,
@@ -157,7 +158,7 @@ def _configure_capture(capture, cv2_module) -> None:
     capture.set(cv2_module.CAP_PROP_FRAME_WIDTH, CAMERA_FRAME_WIDTH)
     capture.set(cv2_module.CAP_PROP_FRAME_HEIGHT, CAMERA_FRAME_HEIGHT)
     if hasattr(cv2_module, "CAP_PROP_FPS"):
-        capture.set(cv2_module.CAP_PROP_FPS, HAND_TRACKING_FPS)
+        capture.set(cv2_module.CAP_PROP_FPS, CAMERA_CAPTURE_FPS)
     if hasattr(cv2_module, "CAP_PROP_BUFFERSIZE"):
         capture.set(cv2_module.CAP_PROP_BUFFERSIZE, 1)
 

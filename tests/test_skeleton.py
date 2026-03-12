@@ -20,7 +20,7 @@ def make_hand() -> list[tuple[float, float, float]]:
 
 
 class SkeletonTests(unittest.TestCase):
-    def test_draw_hand_skeleton_renders_ring_line_and_only_pinky_tip_marker(self) -> None:
+    def test_draw_hand_skeleton_omits_ring_tip_marker_and_ring_line(self) -> None:
         surface = pygame.Surface((320, 180), pygame.SRCALPHA)
         draw_hand_skeleton(surface, make_hand(), 320, 180, caption=None)
 
@@ -31,8 +31,8 @@ class SkeletonTests(unittest.TestCase):
 
         self.assertGreater(pinky_tip.a, 0)
         self.assertEqual(pinky_joint.a, 0)
-        self.assertGreater(ring_tip.a, 0)
-        self.assertGreater(ring_line_midpoint.a, 0)
+        self.assertEqual(ring_tip.a, 0)
+        self.assertEqual(ring_line_midpoint.a, 0)
 
 
 if __name__ == "__main__":

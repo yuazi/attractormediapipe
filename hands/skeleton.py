@@ -96,25 +96,18 @@ def draw_hand_skeleton(
     line_width = max(1, int(round(2 * scale)))
     point_radius = max(4, int(round(6 * scale)))
     shadow_radius = point_radius + max(2, int(round(4 * scale)))
-    font_size = max(15, int(round(21 * scale)))
+    font_size = max(12, int(round(17 * scale)))
     text_gap = max(8, int(round(12 * scale)))
 
     thumb_tip = (int(landmarks[4][0] * width), int(landmarks[4][1] * height))
     index_tip = (int(landmarks[8][0] * width), int(landmarks[8][1] * height))
-    ring_tip = (int(landmarks[16][0] * width), int(landmarks[16][1] * height)) if len(landmarks) >= 17 else None
     glow_color = (*color, 70)
     pygame.draw.line(surface, glow_color, thumb_tip, index_tip, line_width + max(1, int(round(2 * scale))))
     pygame.draw.line(surface, color, thumb_tip, index_tip, line_width)
-    if ring_tip is not None:
-        pygame.draw.line(surface, glow_color, thumb_tip, ring_tip, line_width + max(1, int(round(2 * scale))))
-        pygame.draw.line(surface, color, thumb_tip, ring_tip, line_width)
     pygame.draw.circle(surface, glow_color, thumb_tip, shadow_radius)
     pygame.draw.circle(surface, glow_color, index_tip, shadow_radius)
     pygame.draw.circle(surface, color, thumb_tip, point_radius)
     pygame.draw.circle(surface, color, index_tip, point_radius)
-    if ring_tip is not None:
-        pygame.draw.circle(surface, glow_color, ring_tip, shadow_radius)
-        pygame.draw.circle(surface, color, ring_tip, point_radius)
 
     if len(landmarks) >= 21:
         pinky_tip = (int(landmarks[20][0] * width), int(landmarks[20][1] * height))

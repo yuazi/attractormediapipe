@@ -233,6 +233,10 @@ class MainModuleTests(unittest.TestCase):
         self.assertTrue(captures[0].released)
         self.assertTrue(captures[1].released)
         self.assertFalse(captures[2].released)
+        self.assertIn((fake_cv2.CAP_PROP_FRAME_WIDTH, module.CAMERA_FRAME_WIDTH), captures[2].settings)
+        self.assertIn((fake_cv2.CAP_PROP_FRAME_HEIGHT, module.CAMERA_FRAME_HEIGHT), captures[2].settings)
+        self.assertIn((fake_cv2.CAP_PROP_FPS, module.CAMERA_CAPTURE_FPS), captures[2].settings)
+        self.assertIn((fake_cv2.CAP_PROP_BUFFERSIZE, 1), captures[2].settings)
 
         sys.modules.pop("main", None)
 
