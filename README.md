@@ -62,7 +62,7 @@ python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --sna
 - Right hand palm X: yaw
 - Right hand palm Y: pitch
 - Right hand thumb + index pinch: zoom
-- Right hand thumb + ring pinch: trail length
+- Right hand thumb + ring pinch: fog
 - Right hand pinky touches palm: switch to the next attractor, with `Switch` shown near the pinky-touch area in the PiP
 
 ### Keyboard and mouse
@@ -80,7 +80,7 @@ python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --sna
 - `+` / `-`: adjust simulation speed
 - `,` / `.`: adjust fog
 - Mouse wheel: zoom
-- Left mouse drag on overlay sliders: adjust speed, trail length, luminosity, and zoom
+- Left mouse drag on overlay sliders: adjust speed, fog, luminosity, and zoom
 - Click `Reset trail` in the parameter panel: restart the current attractor from zero visible history
 
 ## UI notes

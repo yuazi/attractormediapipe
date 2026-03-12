@@ -18,6 +18,27 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_renderer_snapshot_exports_do_not_eagerly_import_scene(self) -> None:
+        module_names = ("renderer", "renderer.scene", "renderer.snapshot")
+        original_modules = {name: sys.modules.get(name) for name in module_names}
+        try:
+            for name in module_names:
+                sys.modules.pop(name, None)
+
+            renderer = importlib.import_module("renderer")
+
+            self.assertNotIn("renderer.scene", sys.modules)
+            self.assertTrue(callable(renderer.export_attractor_snapshot))
+            self.assertNotIn("renderer.scene", sys.modules)
+            self.assertTrue(callable(renderer.SnapshotRequest))
+            self.assertNotIn("renderer.scene", sys.modules)
+        finally:
+            for name in module_names:
+                sys.modules.pop(name, None)
+            for name, module in original_modules.items():
+                if module is not None:
+                    sys.modules[name] = module
+
     def test_points_per_second_hits_configured_rate_at_max_speed(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
@@ -158,6 +179,60 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_open_camera_capture_auto_scan_falls_back_to_next_working_device(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        class FakeCapture:
+            def __init__(self, *, opened: bool, readable: bool) -> None:
+                self._opened = opened
+                self._readable = readable
+                self.released = False
+                self.settings: list[tuple[int, int]] = []
+
+            def isOpened(self) -> bool:
+                return self._opened
+
+            def read(self):
+                return self._readable, object() if self._readable else None
+
+            def release(self) -> None:
+                self.released = True
+
+            def set(self, prop: int, value: int) -> bool:
+                self.settings.append((prop, value))
+                return True
+
+        captures = {
+            0: FakeCapture(opened=False, readable=False),
+            1: FakeCapture(opened=True, readable=False),
+            2: FakeCapture(opened=True, readable=True),
+        }
+        open_order: list[int] = []
+
+        def video_capture(index: int):
+            open_order.append(index)
+            return captures[index]
+
+        fake_cv2 = types.SimpleNamespace(
+            VideoCapture=video_capture,
+            CAP_PROP_FRAME_WIDTH=1,
+            CAP_PROP_FRAME_HEIGHT=2,
+            CAP_PROP_FPS=3,
+            CAP_PROP_BUFFERSIZE=4,
+        )
+
+        capture, index = module._open_camera_capture(fake_cv2, -1)
+
+        self.assertIs(capture, captures[2])
+        self.assertEqual(index, 2)
+        self.assertEqual(open_order, [0, 1, 2])
+        self.assertTrue(captures[0].released)
+        self.assertTrue(captures[1].released)
+        self.assertFalse(captures[2].released)
+
+        sys.modules.pop("main", None)
+
     def test_maybe_create_camera_session_disables_camera_when_tracker_init_fails(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
@@ -168,6 +243,9 @@ class MainModuleTests(unittest.TestCase):
 
             def isOpened(self) -> bool:
                 return True
+
+            def read(self):
+                return True, object()
 
             def release(self) -> None:
                 self.released = True

@@ -153,7 +153,7 @@ HUD_SHORTCUTS = (
     ("1-9", "Switch attractor"),
     ("R", "Reset trail"),
     ("SPACE", "Pause or resume"),
-    ("S", "Export 4K snapshot"),
+    ("S", "Export 5K snapshot"),
     ("WHEEL", "Zoom"),
     ("L PINCH", "Speed"),
     ("L RING", "Luminosity"),

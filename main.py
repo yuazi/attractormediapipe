@@ -40,14 +40,15 @@ KEYBOARD_YAW_STEP = 8.0
 KEYBOARD_PITCH_STEP = 6.0
 KEYBOARD_YAW_HOLD_RATE = 135.0
 KEYBOARD_PITCH_HOLD_RATE = 100.0
+AUTO_CAMERA_SCAN_LIMIT = 5
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ModernGL strange attractor trail viewer")
     parser.add_argument("--no-camera", action="store_true", dest="no_camera", help="Disable webcam hand tracking")
     parser.add_argument("--demo", action="store_true", help="Force demo mode (disables camera)")
-    parser.add_argument("--camera-index", type=int, default=-1, dest="camera_index", help="Camera device index to use (-1 = auto-detect built-in camera)")
-    parser.add_argument("--headless", action="store_true", help="Run without opening a window; requires snapshot export")
+    parser.add_argument("--camera-index", type=int, default=-1, dest="camera_index", help="Camera device index to use (-1 = auto-scan indices 0-4)")
+    parser.add_argument("--headless", action="store_true", help="Run without opening a window; requires --snapshot-only or --screenshot-path")
     parser.add_argument("--frames", type=int, default=0, help="Exit after N rendered frames (0 keeps running)")
     parser.add_argument("--screenshot-path", type=str, default="", help="Output path for snapshot-only or headless export")
     parser.add_argument("--snapshot-only", action="store_true", help="Export a Datashader snapshot and exit")
@@ -146,29 +147,39 @@ class CameraTrackerSession:
         self.tracker.close()
 
 
-def _find_builtin_camera_index() -> int:
-    import json
-    import platform
-    import subprocess
+def _configure_capture(capture, cv2_module) -> None:
+    capture.set(cv2_module.CAP_PROP_FRAME_WIDTH, CAMERA_FRAME_WIDTH)
+    capture.set(cv2_module.CAP_PROP_FRAME_HEIGHT, CAMERA_FRAME_HEIGHT)
+    if hasattr(cv2_module, "CAP_PROP_FPS"):
+        capture.set(cv2_module.CAP_PROP_FPS, HAND_TRACKING_FPS)
+    if hasattr(cv2_module, "CAP_PROP_BUFFERSIZE"):
+        capture.set(cv2_module.CAP_PROP_BUFFERSIZE, 1)
 
-    if platform.system() != "Darwin":
-        return 0
-    try:
-        result = subprocess.run(
-            ["system_profiler", "SPCameraDataType", "-json"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        cameras = json.loads(result.stdout).get("SPCameraDataType", [])
-        for idx, cam in enumerate(cameras):
-            name = cam.get("_name", "").lower()
-            model = cam.get("spcamera_model-id", "").lower()
-            if "facetime" in name or "facetime" in model:
-                return idx
-    except Exception:
-        pass
-    return 0
+
+def _camera_index_candidates(requested_index: int, *, scan_limit: int = AUTO_CAMERA_SCAN_LIMIT) -> tuple[int, ...]:
+    if requested_index >= 0:
+        return (requested_index,)
+    return tuple(range(scan_limit))
+
+
+def _open_camera_capture(cv2_module, requested_index: int):
+    for index in _camera_index_candidates(requested_index):
+        try:
+            capture = cv2_module.VideoCapture(index)
+        except Exception:
+            continue
+        if not capture.isOpened():
+            capture.release()
+            continue
+        _configure_capture(capture, cv2_module)
+        try:
+            ok, _frame = capture.read()
+        except Exception:
+            ok = False
+        if ok:
+            return capture, index
+        capture.release()
+    return None, None
 
 
 def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSession | None:
@@ -185,17 +196,9 @@ def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSessio
     if not MEDIAPIPE_AVAILABLE:
         return None
 
-    cam_index = args.camera_index if args.camera_index >= 0 else _find_builtin_camera_index()
-    capture = cv2.VideoCapture(cam_index)
-    if not capture.isOpened():
-        capture.release()
+    capture, _camera_index = _open_camera_capture(cv2, args.camera_index)
+    if capture is None:
         return None
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_FRAME_WIDTH)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_FRAME_HEIGHT)
-    if hasattr(cv2, "CAP_PROP_FPS"):
-        capture.set(cv2.CAP_PROP_FPS, HAND_TRACKING_FPS)
-    if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
-        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     tracker = None
     try:
         tracker = HandTracker()
