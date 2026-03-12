@@ -9,17 +9,19 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageChops
 
-from config import SNAPSHOT_HEIGHT, SNAPSHOT_WIDTH
+from config import DEFAULT_FOG, SNAPSHOT_HEIGHT, SNAPSHOT_WIDTH
 from renderer.snapshot import (
     SnapshotController,
+    SnapshotExportResult,
     SnapshotRequest,
     _cover_frame_points,
     _render_density_image,
     ensure_snapshot_environment,
     export_attractor_snapshot,
     snapshot_filename,
+    snapshot_output_paths,
 )
 
 
@@ -44,10 +46,13 @@ class SnapshotTests(unittest.TestCase):
                 sample_stride=1,
             )
             result = export_attractor_snapshot(request)
-            self.assertEqual(result, str(output_path))
-            self.assertTrue(output_path.exists())
-            self.assertGreater(os.path.getsize(output_path), 0)
-            with Image.open(output_path) as image:
+            self.assertEqual(result.clean_path, str(Path(tmpdir) / "snapshot_clean.png"))
+            self.assertEqual(result.textured_path, str(Path(tmpdir) / "snapshot_textured.png"))
+            self.assertTrue(Path(result.clean_path).exists())
+            self.assertTrue(Path(result.textured_path).exists())
+            self.assertGreater(os.path.getsize(result.clean_path), 0)
+            self.assertGreater(os.path.getsize(result.textured_path), 0)
+            with Image.open(result.clean_path) as image:
                 self.assertEqual(image.size, (640, 360))
                 bbox = image.convert("L").point(lambda value: 255 if value > 0 else 0).getbbox()
                 self.assertIsNotNone(bbox)
@@ -56,6 +61,10 @@ class SnapshotTests(unittest.TestCase):
                 height = bbox[3] - bbox[1]
                 self.assertGreater(width, int(image.width * 0.65))
                 self.assertGreater(height, int(image.height * 0.65))
+            with Image.open(result.clean_path) as clean_image, Image.open(result.textured_path) as textured_image:
+                self.assertEqual(clean_image.size, (640, 360))
+                self.assertEqual(textured_image.size, (640, 360))
+                self.assertIsNotNone(ImageChops.difference(clean_image, textured_image).getbbox())
 
     def test_cover_frame_points_scales_to_cover_snapshot_canvas(self) -> None:
         points = np.array(
@@ -86,6 +95,7 @@ class SnapshotTests(unittest.TestCase):
         )
 
         self.assertEqual((request.width, request.height), (SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT))
+        self.assertEqual(request.fog, DEFAULT_FOG)
 
     def test_snapshot_request_rejects_invalid_dimensions_and_sampling_parameters(self) -> None:
         kwargs = dict(
@@ -107,12 +117,19 @@ class SnapshotTests(unittest.TestCase):
             SnapshotRequest(**kwargs, burn_in=-1)
         with self.assertRaisesRegex(ValueError, "sample_stride"):
             SnapshotRequest(**kwargs, sample_stride=0)
+        with self.assertRaisesRegex(ValueError, "fog"):
+            SnapshotRequest(**kwargs, fog=1.5)
 
     def test_snapshot_filename_defaults_to_screenshot_folder(self) -> None:
         output = Path(snapshot_filename())
         self.assertEqual(output.parent, Path("screenshot"))
         self.assertTrue(output.name.startswith("attractor_"))
         self.assertEqual(output.suffix, ".png")
+
+    def test_snapshot_output_paths_add_variant_suffixes(self) -> None:
+        output = snapshot_output_paths("wallpaper.png")
+        self.assertEqual(output.clean, Path("wallpaper_clean.png"))
+        self.assertEqual(output.textured, Path("wallpaper_textured.png"))
 
     def test_snapshot_density_palette_tracks_attractor_accent(self) -> None:
         density = np.array([[0.0, 1.0], [4.0, 12.0]], dtype=np.float32)
@@ -141,10 +158,10 @@ class SnapshotTests(unittest.TestCase):
             sample_stride=1,
         )
 
-        def fake_export(_request: SnapshotRequest) -> str:
+        def fake_export(_request: SnapshotRequest) -> SnapshotExportResult:
             time.sleep(0.05)
             finished.set()
-            return "/tmp/test_snapshot.png"
+            return SnapshotExportResult("/tmp/test_snapshot_clean.png", "/tmp/test_snapshot_textured.png")
 
         with mock.patch("renderer.snapshot.export_attractor_snapshot", side_effect=fake_export):
             self.assertTrue(controller.start(request))
@@ -152,7 +169,7 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertTrue(finished.is_set())
         self.assertFalse(controller.is_running)
-        self.assertEqual(controller.message, "Snapshot saved: test_snapshot.png")
+        self.assertEqual(controller.message, "Snapshots saved: test_snapshot_clean.png, test_snapshot_textured.png")
 
 
 if __name__ == "__main__":

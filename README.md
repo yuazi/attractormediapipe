@@ -9,10 +9,11 @@ Interactive strange attractor viewer built around `pygame`, `moderngl`, `numba`,
 - Nine active attractors: Lorenz, Aizawa, Sprott B, Thomas, Dadras, Chen, Langford, Rossler, and Halvorsen
 - Numba-compiled RK4 stepping and batched sampling for live trails and snapshot exports
 - ModernGL real-time renderer with additive point glow and shader-driven pulse / Y-axis drift
+- Procedural grain-texture background with subtle live drift and a separate fog veil so attractors stay legible
 - Gesture actions: left pinky touch resets the current attractor, right pinky touch switches to the next
 - Grid-based HUD overlay with named study navigation, frosted utility panels, study placard, and live parameter sliders
 - Stylized PiP camera panel with optional live webcam feed and MediaPipe hand tracking overlays
-- High-resolution Datashader export of the currently active attractor with inferno density coloring
+- High-resolution Datashader export of the currently active attractor as paired clean and textured wallpapers
 
 ## Install
 
@@ -93,7 +94,8 @@ python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --sna
 - The exporter generates `5,000,000` points for the current attractor.
 - Default output resolution is `5120x2880`.
 - Use `--snapshot-width` and `--snapshot-height` to match your wallpaper resolution or aspect ratio.
-- Files are saved as `attractor_YYYYMMDD_HHMMSS.png` unless `--screenshot-path` is provided.
+- Each export writes two files: `*_clean.png` and `*_textured.png`.
+- Files are saved as `attractor_YYYYMMDD_HHMMSS_clean.png` and `attractor_YYYYMMDD_HHMMSS_textured.png` unless `--screenshot-path` is provided as the base name.
 - The exporter sets `NUMBA_CACHE_DIR` automatically so Datashader works on environments where the default cache path is not writable.
 
 ## Project layout

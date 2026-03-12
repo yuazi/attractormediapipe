@@ -4,7 +4,7 @@ import os
 import time
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from config import CAMERA_FRAME_HEIGHT, CAMERA_FRAME_WIDTH, HAND_TRACKING_FPS
+from config import HAND_TRACKING_FPS, TRACKING_FRAME_HEIGHT, TRACKING_FRAME_WIDTH
 
 try:
     import cv2
@@ -136,10 +136,10 @@ class HandTracker:
             return self._last_output
 
         frame_h, frame_w = frame_bgr.shape[:2]
-        if frame_w != CAMERA_FRAME_WIDTH or frame_h != CAMERA_FRAME_HEIGHT:
+        if frame_w != TRACKING_FRAME_WIDTH or frame_h != TRACKING_FRAME_HEIGHT:
             frame_bgr = cv2.resize(
                 frame_bgr,
-                (CAMERA_FRAME_WIDTH, CAMERA_FRAME_HEIGHT),
+                (TRACKING_FRAME_WIDTH, TRACKING_FRAME_HEIGHT),
                 interpolation=cv2.INTER_LINEAR,
             )
 

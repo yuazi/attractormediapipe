@@ -15,6 +15,7 @@ from PIL import Image
 from attractors.manager import HUD_ACCENT_OVERRIDES, create_active_attractor, normalize_points
 from config import (
     DEFAULT_DT,
+    DEFAULT_FOG,
     SCREENSHOT_DIR,
     SCREENSHOT_PREFIX,
     SNAPSHOT_BURN_IN,
@@ -24,6 +25,7 @@ from config import (
     SNAPSHOT_WIDTH,
 )
 
+from .background import compose_textured_density
 from .common import animated_points, compute_mvp, project_ndc
 
 
@@ -36,6 +38,7 @@ class SnapshotRequest:
     zoom: float
     time_value: float
     luminosity: float
+    fog: float = DEFAULT_FOG
     output_path: str = ""
     width: int = SNAPSHOT_WIDTH
     height: int = SNAPSHOT_HEIGHT
@@ -56,6 +59,20 @@ class SnapshotRequest:
             raise ValueError("sample_stride must be >= 1")
         if self.dt <= 0.0:
             raise ValueError("dt must be > 0")
+        if not 0.0 <= self.fog <= 1.0:
+            raise ValueError("fog must be within [0.0, 1.0]")
+
+
+@dataclass(frozen=True)
+class SnapshotExportResult:
+    clean_path: str
+    textured_path: str
+
+
+@dataclass(frozen=True)
+class SnapshotOutputPaths:
+    clean: Path
+    textured: Path
 
 
 def ensure_snapshot_environment() -> str:
@@ -118,6 +135,21 @@ def snapshot_filename(prefix: str = SCREENSHOT_PREFIX) -> str:
     return str(Path(SCREENSHOT_DIR) / f"{prefix}_{timestamp}.png")
 
 
+def snapshot_output_paths(output_path: str = "", prefix: str = SCREENSHOT_PREFIX) -> SnapshotOutputPaths:
+    base_path = Path(output_path) if output_path else Path(snapshot_filename(prefix))
+    suffix = base_path.suffix or ".png"
+    stem = base_path.stem or prefix
+    for variant in ("_clean", "_textured"):
+        if stem.endswith(variant):
+            stem = stem[: -len(variant)] or prefix
+            break
+
+    return SnapshotOutputPaths(
+        clean=base_path.with_name(f"{stem}_clean{suffix}"),
+        textured=base_path.with_name(f"{stem}_textured{suffix}"),
+    )
+
+
 def _accent_palette(values: np.ndarray, accent: tuple[int, int, int]) -> np.ndarray:
     accent_rgb = np.asarray(accent, dtype=np.float32) / np.float32(255.0)
     shadow = accent_rgb * np.float32(0.12)
@@ -178,7 +210,7 @@ def _cover_frame_points(points_2d: np.ndarray, overscan: float = 1.02) -> np.nda
     return (centered * scale).astype(np.float32, copy=False)
 
 
-def export_attractor_snapshot(request: SnapshotRequest) -> str:
+def export_attractor_snapshot(request: SnapshotRequest) -> SnapshotExportResult:
     ensure_snapshot_environment()
     ds, pd = _import_datashader_dependencies()
 
@@ -231,13 +263,15 @@ def export_attractor_snapshot(request: SnapshotRequest) -> str:
     dataframe = pd.DataFrame({"x": x, "y": y})
     canvas = ds.Canvas(plot_width=request.width, plot_height=request.height, x_range=(-1.0, 1.0), y_range=(-1.0, 1.0))
     density = canvas.points(dataframe, "x", "y", agg=ds.count())
-    rgb = _render_density_image(np.asarray(density), request.luminosity, accent)
+    clean_rgb = _render_density_image(np.asarray(density), request.luminosity, accent)
+    textured_rgb = compose_textured_density(clean_rgb, accent=accent, fog_amount=request.fog)
 
-    output = request.output_path or snapshot_filename()
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray((rgb * 255.0).astype(np.uint8), mode="RGB").save(output_path)
-    return str(output_path)
+    output_paths = snapshot_output_paths(request.output_path)
+    output_paths.clean.parent.mkdir(parents=True, exist_ok=True)
+    output_paths.textured.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray((clean_rgb * 255.0).astype(np.uint8), mode="RGB").save(output_paths.clean)
+    Image.fromarray((textured_rgb * 255.0).astype(np.uint8), mode="RGB").save(output_paths.textured)
+    return SnapshotExportResult(clean_path=str(output_paths.clean), textured_path=str(output_paths.textured))
 
 
 class SnapshotController:
@@ -274,11 +308,11 @@ class SnapshotController:
 
     def _run(self, request: SnapshotRequest) -> None:
         try:
-            path = export_attractor_snapshot(request)
+            result = export_attractor_snapshot(request)
         except Exception as exc:  # pragma: no cover - exercised via integration path
             message = f"Snapshot failed: {exc}"
         else:
-            message = f"Snapshot saved: {Path(path).name}"
+            message = f"Snapshots saved: {Path(result.clean_path).name}, {Path(result.textured_path).name}"
 
         with self._lock:
             self._is_running = False

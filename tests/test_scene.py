@@ -58,27 +58,34 @@ class DummyContext:
 
 
 class SceneRendererTests(unittest.TestCase):
-    def test_render_atmosphere_uses_fog_opacity_without_rebuilding_cache(self) -> None:
-        overlay_texture = DummyTexture()
+    def test_render_atmosphere_caches_background_layers_across_fog_changes(self) -> None:
+        background_texture = DummyTexture()
+        fog_texture = DummyTexture()
         probe = SimpleNamespace(
             width=8,
             height=6,
-            _atmosphere_cache={},
-            overlay_texture=overlay_texture,
-            quad_calls=[],
+            _background_time=0.0,
+            _background_layer_key=None,
+            _fog_layer_key=None,
+            background_texture=background_texture,
+            fog_texture=fog_texture,
+            composite_calls=[],
         )
-        probe._render_quad_texture = lambda texture, rect, opacity=1.0: probe.quad_calls.append((texture, rect, opacity))
+        probe._render_background_composite = (
+            lambda rect, **kwargs: probe.composite_calls.append((rect, kwargs["fog_opacity"]))
+        )
 
         SceneRenderer._render_atmosphere(probe, (10, 20, 30), 0.25)
-        cache_key = (probe.width, probe.height, (10, 20, 30))
-        cached_pixels = probe._atmosphere_cache[cache_key]
-
         SceneRenderer._render_atmosphere(probe, (10, 20, 30), 0.75)
 
-        self.assertIs(probe._atmosphere_cache[cache_key], cached_pixels)
-        self.assertEqual(probe.quad_calls[0], (overlay_texture, (0, 0, 8, 6), 0.25))
-        self.assertEqual(probe.quad_calls[1], (overlay_texture, (0, 0, 8, 6), 0.75))
-        self.assertEqual(overlay_texture.writes[0], overlay_texture.writes[1])
+        self.assertEqual(len(background_texture.writes), 1)
+        self.assertEqual(len(fog_texture.writes), 1)
+        self.assertEqual(probe.composite_calls[0][0], (0, 0, 8, 6))
+        self.assertGreater(probe.composite_calls[0][1], 0.22)
+        self.assertLess(probe.composite_calls[0][1], 0.26)
+        self.assertEqual(probe.composite_calls[1][0], (0, 0, 8, 6))
+        self.assertGreater(probe.composite_calls[1][1], 0.70)
+        self.assertLess(probe.composite_calls[1][1], 0.76)
 
     def test_draw_passes_fog_to_atmosphere_and_luminosity_to_point_shader(self) -> None:
         point_program = DummyProgram()

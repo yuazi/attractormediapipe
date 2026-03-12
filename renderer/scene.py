@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import textwrap
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from config import (
 )
 from hands.skeleton import draw_hand_skeleton
 
+from .background import get_background_layers
 from .common import compute_mvp
 
 
@@ -121,13 +123,47 @@ QUAD_FRAGMENT_SHADER = """
 
 uniform sampler2D u_texture;
 uniform float u_opacity;
+uniform vec2 u_uv_offset;
+uniform vec2 u_uv_scale;
 
 in vec2 v_uv;
 out vec4 fragColor;
 
 void main() {
-    vec4 color = texture(u_texture, v_uv);
+    vec2 sample_uv = clamp(v_uv * u_uv_scale + u_uv_offset, vec2(0.0), vec2(1.0));
+    vec4 color = texture(u_texture, sample_uv);
     fragColor = vec4(color.rgb, color.a * u_opacity);
+}
+"""
+
+BACKGROUND_FRAGMENT_SHADER = """
+#version 330
+
+uniform sampler2D u_base_texture;
+uniform sampler2D u_fog_texture;
+uniform float u_fog_opacity;
+uniform float u_time;
+uniform vec2 u_base_uv_offset;
+uniform vec2 u_base_uv_scale;
+uniform vec2 u_fog_uv_offset;
+uniform vec2 u_fog_uv_scale;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+void main() {
+    vec2 base_uv = v_uv * u_base_uv_scale + u_base_uv_offset;
+    vec2 fog_uv = clamp(v_uv * u_fog_uv_scale + u_fog_uv_offset, vec2(0.0), vec2(1.0));
+    float organic_1 = sin(base_uv.x * 18.0 + u_time * 0.45) * cos(base_uv.y * 9.0 + u_time * 0.34);
+    float organic_2 = cos(base_uv.x * 12.0 - u_time * 0.28) * sin(base_uv.y * 14.0 + u_time * 0.40);
+    base_uv += vec2(organic_1 * 0.0020, (organic_1 + organic_2) * 0.0032);
+    base_uv = clamp(base_uv, vec2(0.0), vec2(1.0));
+    vec4 base_color = texture(u_base_texture, base_uv);
+    vec4 fog_color = texture(u_fog_texture, fog_uv);
+    float fog_alpha = clamp(fog_color.a * u_fog_opacity, 0.0, 1.0);
+    float pulse = 0.95 + 0.05 * sin(u_time * 0.22);
+    vec3 rgb = mix(base_color.rgb * pulse, fog_color.rgb, fog_alpha);
+    fragColor = vec4(rgb, 1.0);
 }
 """
 
@@ -267,6 +303,7 @@ class SceneRenderer:
         self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f 1f", "in_position", "in_age")])
 
         self.quad_program = self.ctx.program(vertex_shader=QUAD_VERTEX_SHADER, fragment_shader=QUAD_FRAGMENT_SHADER)
+        self.background_program = self.ctx.program(vertex_shader=QUAD_VERTEX_SHADER, fragment_shader=BACKGROUND_FRAGMENT_SHADER)
         quad_vertices = np.array(
             [
                 0.0, 0.0, 0.0, 1.0,
@@ -280,7 +317,15 @@ class SceneRenderer:
         )
         self.quad_buffer = self.ctx.buffer(quad_vertices.tobytes())
         self.quad_vao = self.ctx.vertex_array(self.quad_program, [(self.quad_buffer, "2f 2f", "in_pos", "in_uv")])
+        self.background_vao = self.ctx.vertex_array(
+            self.background_program,
+            [(self.quad_buffer, "2f 2f", "in_pos", "in_uv")],
+        )
 
+        self.background_texture = self.ctx.texture(self._overlay_size, 4)
+        self.background_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.fog_texture = self.ctx.texture(self._overlay_size, 4)
+        self.fog_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.overlay_texture = self.ctx.texture(self._overlay_size, 4)
         self.overlay_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
         self.camera_texture = self.ctx.texture((PIP_W, PIP_H), 3)
@@ -299,12 +344,14 @@ class SceneRenderer:
         self._font_display_13 = self._load_font(self._s(13), "hud_display")
         self._font_display_32 = self._load_font(self._s(32), "hud_display")
         self.clock = pygame.time.Clock()
+        self._background_time = 0.0
         self._shortcuts_progress = 1.0
         self._live_axis = 0
         self._last_state_name: str | None = None
         self._last_state_vector: tuple[float, float, float] | None = None
         self._fps_history: list[float] = [30.0] * 5
-        self._atmosphere_cache: dict[tuple[int, int, tuple[int, int, int]], bytes] = {}
+        self._background_layer_key: tuple[int, int, tuple[int, int, int]] | None = None
+        self._fog_layer_key: tuple[int, int, tuple[int, int, int]] | None = None
         self._vignette_cache: dict[tuple[int, int], Image.Image] = {}
         self._scanlines_cache: dict[tuple[int, int], Image.Image] = {}
 
@@ -365,10 +412,18 @@ class SceneRenderer:
             self.width, self.height = width, height
         self.ctx.viewport = (0, 0, self.width, self.height)
         if (self.width, self.height) != self._overlay_size:
+            self.background_texture.release()
+            self.fog_texture.release()
             self.overlay_texture.release()
             self._overlay_size = (self.width, self.height)
+            self.background_texture = self.ctx.texture(self._overlay_size, 4)
+            self.background_texture.filter = (self.moderngl.LINEAR, self.moderngl.LINEAR)
+            self.fog_texture = self.ctx.texture(self._overlay_size, 4)
+            self.fog_texture.filter = (self.moderngl.LINEAR, self.moderngl.LINEAR)
             self.overlay_texture = self.ctx.texture(self._overlay_size, 4)
             self.overlay_texture.filter = (self.moderngl.NEAREST, self.moderngl.NEAREST)
+            self._background_layer_key = None
+            self._fog_layer_key = None
 
     def _ensure_point_capacity(self, byte_count: int) -> None:
         if byte_count <= self._point_capacity:
@@ -379,14 +434,50 @@ class SceneRenderer:
         self.point_vao.release()
         self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f 1f", "in_position", "in_age")])
 
-    def _render_quad_texture(self, texture, rect: tuple[int, int, int, int], opacity: float = 1.0) -> None:
+    def _render_quad_texture(
+        self,
+        texture,
+        rect: tuple[int, int, int, int],
+        opacity: float = 1.0,
+        *,
+        uv_offset: tuple[float, float] = (0.0, 0.0),
+        uv_scale: tuple[float, float] = (1.0, 1.0),
+    ) -> None:
         self.ctx.blend_func = self.moderngl.SRC_ALPHA, self.moderngl.ONE_MINUS_SRC_ALPHA
         texture.use(location=0)
         self.quad_program["u_texture"].value = 0
         self.quad_program["u_opacity"].value = float(opacity)
+        self.quad_program["u_uv_offset"].value = tuple(float(value) for value in uv_offset)
+        self.quad_program["u_uv_scale"].value = tuple(float(value) for value in uv_scale)
         self.quad_program["u_screen_size"].value = (float(self.width), float(self.height))
         self.quad_program["u_rect"].value = tuple(float(value) for value in rect)
         self.quad_vao.render()
+
+    def _render_background_composite(
+        self,
+        rect: tuple[int, int, int, int],
+        *,
+        time_value: float,
+        fog_opacity: float,
+        base_offset: tuple[float, float],
+        base_scale: tuple[float, float],
+        fog_offset: tuple[float, float],
+        fog_scale: tuple[float, float],
+    ) -> None:
+        self.ctx.blend_func = self.moderngl.SRC_ALPHA, self.moderngl.ONE_MINUS_SRC_ALPHA
+        self.background_texture.use(location=0)
+        self.fog_texture.use(location=1)
+        self.background_program["u_base_texture"].value = 0
+        self.background_program["u_fog_texture"].value = 1
+        self.background_program["u_fog_opacity"].value = float(max(0.0, min(1.0, fog_opacity)))
+        self.background_program["u_base_uv_offset"].value = tuple(float(value) for value in base_offset)
+        self.background_program["u_base_uv_scale"].value = tuple(float(value) for value in base_scale)
+        self.background_program["u_fog_uv_offset"].value = tuple(float(value) for value in fog_offset)
+        self.background_program["u_fog_uv_scale"].value = tuple(float(value) for value in fog_scale)
+        self.background_program["u_time"].value = float(time_value)
+        self.background_program["u_screen_size"].value = (float(self.width), float(self.height))
+        self.background_program["u_rect"].value = tuple(float(value) for value in rect)
+        self.background_vao.render()
 
     def draw(self, state: SceneState) -> None:
         self._sync_window_size()
@@ -394,6 +485,7 @@ class SceneRenderer:
         layout = self._hud_layout(state.attractor_names)
         background = tuple(channel / 255.0 for channel in BACKGROUND_COLOR)
         self.ctx.clear(background[0], background[1], background[2], 1.0)
+        self._background_time = float(state.time_value)
         self._render_atmosphere(accent, state.fog)
 
         if state.fps > 0.0:
@@ -446,31 +538,34 @@ class SceneRenderer:
 
     def _render_atmosphere(self, accent: tuple[int, int, int], fog: float) -> None:
         cache_key = (self.width, self.height, accent)
-        pixels = self._atmosphere_cache.get(cache_key)
-        if pixels is None:
-            y = np.linspace(-1.0, 1.0, self.height, dtype=np.float32)[:, None]
-            x = np.linspace(-1.0, 1.0, self.width, dtype=np.float32)[None, :]
-            center_glow = np.exp(-(((x * 1.12) ** 2) + ((y * 0.98) ** 2)) * 3.8)
-            shoulder_glow = np.exp(-((((x - 0.18) * 1.9) ** 2) + (((y + 0.12) * 1.6) ** 2)) * 4.8)
-            gold_glow = np.exp(-((((x + 0.07) * 1.65) ** 2) + (((y - 0.04) * 1.45) ** 2)) * 7.2)
-            rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
-            rgba[:, :, 0] = accent[0]
-            rgba[:, :, 1] = accent[1]
-            rgba[:, :, 2] = accent[2]
-            alpha = np.clip(center_glow * 28.0 + shoulder_glow * 16.0, 0.0, 48.0)
-            rgba[:, :, 3] = alpha.astype(np.uint8)
+        time_value = float(getattr(self, "_background_time", 0.0))
+        if self._background_layer_key != cache_key or self._fog_layer_key != cache_key:
+            layers = get_background_layers(self.width, self.height, accent)
+            if self._background_layer_key != cache_key:
+                self.background_texture.write(layers.texture_rgba.tobytes())
+                self._background_layer_key = cache_key
+            if self._fog_layer_key != cache_key:
+                self.fog_texture.write(layers.fog_rgba.tobytes())
+                self._fog_layer_key = cache_key
 
-            gold_layer = np.zeros_like(rgba)
-            gold_layer[:, :, 0] = HUD_GOLD[0]
-            gold_layer[:, :, 1] = HUD_GOLD[1]
-            gold_layer[:, :, 2] = HUD_GOLD[2]
-            gold_layer[:, :, 3] = np.clip(gold_glow * 12.0, 0.0, 18.0).astype(np.uint8)
-            combined = np.maximum(rgba, gold_layer)
-            pixels = combined.tobytes()
-            self._atmosphere_cache[cache_key] = pixels
-
-        self.overlay_texture.write(pixels)
-        self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height), opacity=fog)
+        base_scale = (0.965, 0.965)
+        base_offset = (
+            0.012 + math.sin(time_value * 0.032) * 0.008,
+            0.018 + math.cos(time_value * 0.029) * 0.010,
+        )
+        fog_offset = (
+            0.026 + math.cos(time_value * 0.018 + 0.8) * 0.014,
+            0.032 + math.sin(time_value * 0.016 + 0.2) * 0.014,
+        )
+        self._render_background_composite(
+            (0, 0, self.width, self.height),
+            time_value=time_value,
+            fog_opacity=fog * (0.94 + 0.06 * math.sin(time_value * 0.18 + 0.3)),
+            base_offset=base_offset,
+            base_scale=base_scale,
+            fog_offset=fog_offset,
+            fog_scale=(0.93, 0.93),
+        )
 
     def _draw_overlay(self, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
         image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
@@ -1148,9 +1243,13 @@ class SceneRenderer:
 
     def quit(self) -> None:
         self.camera_texture.release()
+        self.background_texture.release()
+        self.fog_texture.release()
         self.overlay_texture.release()
+        self.background_vao.release()
         self.quad_vao.release()
         self.quad_buffer.release()
+        self.background_program.release()
         self.quad_program.release()
         self.point_vao.release()
         self.point_buffer.release()

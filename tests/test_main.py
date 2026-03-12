@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -155,7 +157,7 @@ class MainModuleTests(unittest.TestCase):
 
         def fake_export(request):
             captured["request"] = request
-            return "/tmp/wallpaper.png"
+            return types.SimpleNamespace(clean_path="/tmp/wallpaper_clean.png", textured_path="/tmp/wallpaper_textured.png")
 
         args = module.parse_args(
             [
@@ -173,7 +175,8 @@ class MainModuleTests(unittest.TestCase):
             with mock.patch("builtins.print"):
                 result = module.run_snapshot_export(args)
 
-        self.assertEqual(result, "/tmp/wallpaper.png")
+        self.assertEqual(result.clean_path, "/tmp/wallpaper_clean.png")
+        self.assertEqual(result.textured_path, "/tmp/wallpaper_textured.png")
         self.assertEqual(captured["request"].width, 7680)
         self.assertEqual(captured["request"].height, 4320)
 
@@ -230,6 +233,55 @@ class MainModuleTests(unittest.TestCase):
         self.assertTrue(captures[0].released)
         self.assertTrue(captures[1].released)
         self.assertFalse(captures[2].released)
+
+        sys.modules.pop("main", None)
+
+    def test_camera_session_close_waits_for_active_read_before_releasing_capture(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        class FakeCapture:
+            def __init__(self) -> None:
+                self.entered_read = threading.Event()
+                self.allow_return = threading.Event()
+                self.released = False
+
+            def read(self):
+                self.entered_read.set()
+                self.allow_return.wait(timeout=1.0)
+                return False, None
+
+            def release(self) -> None:
+                self.released = True
+
+        class FakeTracker:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def process(self, _frame):
+                return {"left": None, "right": None}
+
+            def close(self) -> None:
+                self.closed = True
+
+        capture = FakeCapture()
+        tracker = FakeTracker()
+        fake_cv2 = types.SimpleNamespace(flip=lambda frame, _axis: frame)
+        session = module.CameraTrackerSession(capture, tracker, fake_cv2)
+
+        self.assertTrue(capture.entered_read.wait(timeout=1.0))
+
+        closer = threading.Thread(target=session.close)
+        closer.start()
+        time.sleep(0.05)
+        self.assertFalse(capture.released)
+
+        capture.allow_return.set()
+        closer.join(timeout=1.0)
+
+        self.assertFalse(closer.is_alive())
+        self.assertTrue(capture.released)
+        self.assertTrue(tracker.closed)
 
         sys.modules.pop("main", None)
 

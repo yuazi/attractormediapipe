@@ -112,6 +112,7 @@ class CameraTrackerSession:
         self.tracker = tracker
         self.cv2 = cv2_module
         self._lock = threading.Lock()
+        self._capture_lock = threading.Lock()
         self._running = True
         self._snapshot = CameraSnapshot(frame=None, hand_data={"left": None, "right": None})
         self._worker = threading.Thread(target=self._run, name="camera-tracker", daemon=True)
@@ -120,7 +121,10 @@ class CameraTrackerSession:
     def _run(self) -> None:
         while self._running:
             try:
-                ok, raw_frame = self.capture.read()
+                with self._capture_lock:
+                    if not self._running or self.capture is None:
+                        break
+                    ok, raw_frame = self.capture.read()
             except Exception:
                 break
 
@@ -141,8 +145,10 @@ class CameraTrackerSession:
 
     def close(self) -> None:
         self._running = False
-        if self.capture is not None:
-            self.capture.release()
+        with self._capture_lock:
+            if self.capture is not None:
+                self.capture.release()
+                self.capture = None
         self._worker.join(timeout=1.0)
         self.tracker.close()
 
@@ -190,6 +196,12 @@ def maybe_create_camera_session(args: argparse.Namespace) -> CameraTrackerSessio
         import cv2
     except ImportError:  # pragma: no cover - optional dependency
         return None
+
+    if hasattr(cv2, "setNumThreads"):
+        try:
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
 
     from hands import HandTracker, MEDIAPIPE_AVAILABLE
 
@@ -277,7 +289,7 @@ def _resolve_snapshot_dimensions(args: argparse.Namespace) -> tuple[int, int]:
     return width, height
 
 
-def run_snapshot_export(args: argparse.Namespace) -> str:
+def run_snapshot_export(args: argparse.Namespace):
     from renderer import SnapshotRequest, export_attractor_snapshot
 
     available = active_attractor_names()
@@ -300,6 +312,7 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
             zoom=DEFAULT_SCALE,
             time_value=0.0,
             luminosity=DEFAULT_LUMINOSITY,
+            fog=DEFAULT_FOG,
             output_path=args.screenshot_path,
             width=width,
             height=height,
@@ -310,7 +323,7 @@ def run_snapshot_export(args: argparse.Namespace) -> str:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     output = export_attractor_snapshot(request)
-    print(f"Saved snapshot: {output}")
+    print(f"Saved snapshots: {output.clean_path}, {output.textured_path}")
     return output
 
 
@@ -400,6 +413,7 @@ def main(argv: list[str] | None = None) -> None:
                                 zoom=controls.zoom,
                                 time_value=animation_time,
                                 luminosity=controls.luminosity,
+                                fog=controls.fog,
                                 width=snapshot_width,
                                 height=snapshot_height,
                                 state=manager.state_vector,
