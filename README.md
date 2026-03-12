@@ -75,8 +75,10 @@ python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --sna
 - `C`: toggle the live camera feed inside the PiP
 - `M`: focus mode, showing only the attractor and camera PiP
 - `1`-`9`: switch attractors directly
-- `UP` / `DOWN`: adjust simulation speed
-- `LEFT` / `RIGHT`: adjust visible trail length
+- `LEFT` / `RIGHT`: rotate yaw
+- `UP` / `DOWN`: rotate pitch
+- `+` / `-`: adjust simulation speed
+- `,` / `.`: adjust fog
 - Mouse wheel: zoom
 - Left mouse drag on overlay sliders: adjust speed, trail length, luminosity, and zoom
 - Click `Reset trail` in the parameter panel: restart the current attractor from zero visible history

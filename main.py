@@ -30,10 +30,16 @@ from config import (
     SNAPSHOT_WIDTH,
     SMOOTH_ALPHA,
     SPEED_RANGE,
+    PITCH_RANGE,
+    YAW_RANGE,
 )
 from hands import GestureInterpreter
 
 SWITCH_CAPTION_DURATION = 0.85
+KEYBOARD_YAW_STEP = 8.0
+KEYBOARD_PITCH_STEP = 6.0
+KEYBOARD_YAW_HOLD_RATE = 135.0
+KEYBOARD_PITCH_HOLD_RATE = 100.0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -213,6 +219,23 @@ def _adjust_fog(controls: ControlState, delta: float) -> None:
     controls.set_target("fog", max(FOG_RANGE[0], min(FOG_RANGE[1], controls._targets["fog"] + delta)))
 
 
+def _adjust_yaw(controls: ControlState, delta: float) -> None:
+    controls.set_target("yaw", max(YAW_RANGE[0], min(YAW_RANGE[1], controls._targets["yaw"] + delta)))
+
+
+def _adjust_pitch(controls: ControlState, delta: float) -> None:
+    controls.set_target("pitch", max(PITCH_RANGE[0], min(PITCH_RANGE[1], controls._targets["pitch"] + delta)))
+
+
+def _apply_held_rotation_controls(controls: ControlState, *, horizontal: float, vertical: float, frame_delta: float) -> None:
+    if frame_delta <= 0.0:
+        return
+    if horizontal:
+        _adjust_yaw(controls, horizontal * KEYBOARD_YAW_HOLD_RATE * frame_delta)
+    if vertical:
+        _adjust_pitch(controls, vertical * KEYBOARD_PITCH_HOLD_RATE * frame_delta)
+
+
 def _adjust_zoom(controls: ControlState, factor: float) -> None:
     controls.set_target("zoom", max(SCALE_RANGE[0], min(SCALE_RANGE[1], controls._targets["zoom"] * factor)))
 
@@ -351,6 +374,7 @@ def main(argv: list[str] | None = None) -> None:
             last_frame_time = now
             if not controls.paused:
                 animation_time += frame_delta
+            pressed_rotation_keys: set[int] = set()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -390,12 +414,24 @@ def main(argv: list[str] | None = None) -> None:
                         _prime_live_trail(manager)
                         sample_budget = 0.0
                     elif event.key == pygame.K_UP:
-                        _adjust_speed(controls, 0.1)
+                        _adjust_pitch(controls, -KEYBOARD_PITCH_STEP)
+                        pressed_rotation_keys.add(pygame.K_UP)
                     elif event.key == pygame.K_DOWN:
-                        _adjust_speed(controls, -0.1)
+                        _adjust_pitch(controls, KEYBOARD_PITCH_STEP)
+                        pressed_rotation_keys.add(pygame.K_DOWN)
                     elif event.key == pygame.K_LEFT:
-                        _adjust_fog(controls, -FOG_STEP_DELTA)
+                        _adjust_yaw(controls, -KEYBOARD_YAW_STEP)
+                        pressed_rotation_keys.add(pygame.K_LEFT)
                     elif event.key == pygame.K_RIGHT:
+                        _adjust_yaw(controls, KEYBOARD_YAW_STEP)
+                        pressed_rotation_keys.add(pygame.K_RIGHT)
+                    elif event.unicode == "+" or event.key == pygame.K_KP_PLUS:
+                        _adjust_speed(controls, 0.1)
+                    elif event.unicode == "-" or event.key == pygame.K_KP_MINUS:
+                        _adjust_speed(controls, -0.1)
+                    elif event.key == pygame.K_COMMA:
+                        _adjust_fog(controls, -FOG_STEP_DELTA)
+                    elif event.key == pygame.K_PERIOD:
                         _adjust_fog(controls, FOG_STEP_DELTA)
                 elif (
                     event.type == pygame.MOUSEBUTTONDOWN
@@ -476,6 +512,16 @@ def main(argv: list[str] | None = None) -> None:
                 controls.set_target("luminosity", gesture_frame.luminosity)
             if gesture_frame.scale is not None:
                 controls.set_target("zoom", gesture_frame.scale)
+
+            pressed = pygame.key.get_pressed()
+            horizontal = float(pressed[pygame.K_RIGHT] and pygame.K_RIGHT not in pressed_rotation_keys) - float(
+                pressed[pygame.K_LEFT] and pygame.K_LEFT not in pressed_rotation_keys
+            )
+            vertical = float(pressed[pygame.K_DOWN] and pygame.K_DOWN not in pressed_rotation_keys) - float(
+                pressed[pygame.K_UP] and pygame.K_UP not in pressed_rotation_keys
+            )
+            _apply_held_rotation_controls(controls, horizontal=horizontal, vertical=vertical, frame_delta=frame_delta)
+
             if gesture_frame.reset_current:
                 left_reset_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
                 _restart_current_trail(manager)

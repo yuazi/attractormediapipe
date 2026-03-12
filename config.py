@@ -105,8 +105,8 @@ HELP_LINES = [
     "[1-9] switch  [R] restart trail  [SPACE] pause",
     "[H] shortcuts  [C] camera  [M] pip mode",
     "[S] snapshot",
-    "[ESC] quit  [UP/DOWN] speed",
-    "[LEFT/RIGHT] fog  [WHEEL] zoom",
+    "[ESC] quit  [ARROWS] rotate",
+    "[+/-] speed  [,/.] fog  [WHEEL] zoom",
 ]
 
 

@@ -60,6 +60,40 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_adjust_yaw_and_pitch_clamp_to_range(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        controls = module.ControlState()
+        module._adjust_yaw(controls, 10_000.0)
+        module._adjust_pitch(controls, -10_000.0)
+        controls.smooth(alpha=1.0)
+
+        self.assertEqual(controls.yaw, module.YAW_RANGE[1])
+        self.assertEqual(controls.pitch, module.PITCH_RANGE[0])
+
+        module._adjust_yaw(controls, -10_000.0)
+        module._adjust_pitch(controls, 10_000.0)
+        controls.smooth(alpha=1.0)
+
+        self.assertEqual(controls.yaw, module.YAW_RANGE[0])
+        self.assertEqual(controls.pitch, module.PITCH_RANGE[1])
+
+        sys.modules.pop("main", None)
+
+    def test_apply_held_rotation_controls_accumulates_over_frame_time(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        controls = module.ControlState()
+        module._apply_held_rotation_controls(controls, horizontal=1.0, vertical=-1.0, frame_delta=0.5)
+        controls.smooth(alpha=1.0)
+
+        self.assertEqual(controls.yaw, module.KEYBOARD_YAW_HOLD_RATE * 0.5)
+        self.assertEqual(controls.pitch, -module.KEYBOARD_PITCH_HOLD_RATE * 0.5)
+
+        sys.modules.pop("main", None)
+
     def test_slider_control_updates_fog_target(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
