@@ -11,7 +11,7 @@ from unittest import mock
 import numpy as np
 from PIL import Image, ImageChops
 
-from config import DEFAULT_FOG, SNAPSHOT_HEIGHT, SNAPSHOT_WIDTH
+from config import DEFAULT_FOG, SNAPSHOT_HEIGHT, SNAPSHOT_PRESET_NAMES, SNAPSHOT_WIDTH
 from renderer.snapshot import (
     SnapshotController,
     SnapshotExportResult,
@@ -23,6 +23,7 @@ from renderer.snapshot import (
     snapshot_filename,
     snapshot_output_paths,
 )
+from screenshot import get_snapshot_preset
 
 
 class SnapshotTests(unittest.TestCase):
@@ -30,6 +31,7 @@ class SnapshotTests(unittest.TestCase):
         ensure_snapshot_environment()
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "snapshot.png"
+            log_path = Path(tmpdir) / "snapshot_log.jsonl"
             request = SnapshotRequest(
                 attractor_name="Lorenz",
                 yaw=0.0,
@@ -44,8 +46,10 @@ class SnapshotTests(unittest.TestCase):
                 sample_count=3000,
                 burn_in=500,
                 sample_stride=1,
+                preset_name="blueprint",
             )
-            result = export_attractor_snapshot(request)
+            with mock.patch("renderer.snapshot.SNAPSHOT_LOG_PATH", str(log_path)):
+                result = export_attractor_snapshot(request)
             self.assertEqual(result.clean_path, str(Path(tmpdir) / "snapshot_clean.png"))
             self.assertEqual(result.textured_path, str(Path(tmpdir) / "snapshot_textured.png"))
             self.assertTrue(Path(result.clean_path).exists())
@@ -61,10 +65,12 @@ class SnapshotTests(unittest.TestCase):
                 height = bbox[3] - bbox[1]
                 self.assertGreater(width, int(image.width * 0.65))
                 self.assertGreater(height, int(image.height * 0.65))
+                self.assertEqual(image.info["Preset"], "blueprint")
+                self.assertEqual(image.info["Attractor"], "Lorenz")
             with Image.open(result.clean_path) as clean_image, Image.open(result.textured_path) as textured_image:
                 self.assertEqual(clean_image.size, (640, 360))
                 self.assertEqual(textured_image.size, (640, 360))
-                self.assertIsNotNone(ImageChops.difference(clean_image, textured_image).getbbox())
+                self.assertIsNone(ImageChops.difference(clean_image, textured_image).getbbox())
 
     def test_cover_frame_points_scales_to_cover_snapshot_canvas(self) -> None:
         points = np.array(
@@ -131,16 +137,56 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(output.clean, Path("wallpaper_clean.png"))
         self.assertEqual(output.textured, Path("wallpaper_textured.png"))
 
-    def test_snapshot_density_palette_tracks_attractor_accent(self) -> None:
+    def test_snapshot_density_palette_tracks_selected_preset(self) -> None:
         density = np.array([[0.0, 1.0], [4.0, 12.0]], dtype=np.float32)
-        warm = _render_density_image(density, 0.8, (230, 57, 70))
-        cool = _render_density_image(density, 0.8, (17, 138, 178))
+        warm = _render_density_image(density, 0.8, "nebula")
+        cool = _render_density_image(density, 0.8, "blueprint")
 
         warm_mean = warm[density > 0.0].mean(axis=0)
         cool_mean = cool[density > 0.0].mean(axis=0)
 
         self.assertGreater(warm_mean[0], warm_mean[2])
         self.assertGreater(cool_mean[2], cool_mean[0])
+
+    def test_snapshot_preset_names_are_importable_from_config(self) -> None:
+        self.assertEqual(set(SNAPSHOT_PRESET_NAMES), {"nebula", "blueprint", "void", "print"})
+        for name in SNAPSHOT_PRESET_NAMES:
+            self.assertEqual(get_snapshot_preset(name).name, name)
+
+    def test_snapshot_export_embeds_metadata_and_appends_log(self) -> None:
+        ensure_snapshot_environment()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "metadata.png"
+            log_path = Path(tmpdir) / "snapshot_log.jsonl"
+            request = SnapshotRequest(
+                attractor_name="Lorenz",
+                yaw=0.0,
+                pitch=0.0,
+                roll=0.0,
+                zoom=1.6,
+                time_value=0.0,
+                luminosity=0.8,
+                output_path=str(output_path),
+                width=320,
+                height=180,
+                sample_count=1500,
+                burn_in=300,
+                sample_stride=1,
+                preset_name="void",
+            )
+
+            with mock.patch("renderer.snapshot.SNAPSHOT_LOG_PATH", str(log_path)):
+                result = export_attractor_snapshot(request)
+
+            with Image.open(result.clean_path) as image:
+                self.assertEqual(image.info["Preset"], "void")
+                self.assertEqual(image.info["Generator"], "attractormediapipe")
+                self.assertIn("Parameters", image.info)
+                self.assertEqual(image.info["Resolution"], "320x180")
+
+            entries = log_path.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(entries), 1)
+            self.assertIn('"Preset": "void"', entries[0])
 
     def test_snapshot_controller_close_waits_for_active_export(self) -> None:
         controller = SnapshotController()

@@ -55,6 +55,8 @@ class GestureTests(unittest.TestCase):
         self.assertTrue(any("[+/-] speed" in line for line in keys_section))
         self.assertTrue(any("[,/.] fog" in line for line in keys_section))
         self.assertTrue(any("[1-9] switch" in line for line in keys_section))
+        self.assertTrue(any("[P] preset" in line for line in keys_section))
+        self.assertTrue(any("[G] ghost" in line for line in keys_section))
 
     def test_left_hand_controls_speed_and_ring_pinch_luminosity_while_right_controls_rotation_and_scale(self) -> None:
         interpreter = GestureInterpreter()

@@ -57,6 +57,15 @@ class PlacardData:
     params: tuple[tuple[str, str], ...]
 
 
+@dataclass(frozen=True)
+class TrailRenderState:
+    positions: np.ndarray
+    center: tuple[float, float, float]
+    inv_extent: float
+    scale_hint: float
+    count: int
+
+
 PLACARD_OVERRIDES = {
     "Lorenz": PlacardData(
         title="Lorenz Attractor",
@@ -307,6 +316,17 @@ class AttractorManager:
         self._append_points(self.index, samples)
         return samples
 
+    def append_external_samples(self, samples: np.ndarray, final_state: Sequence[float]) -> np.ndarray:
+        typed = np.asarray(samples, dtype=np.float32)
+        self._append_points(self.index, typed)
+        self.current.set_state(final_state)
+        return typed
+
+    def randomize_current_parameters(self, variation: float) -> dict[str, float]:
+        randomized = self.current.randomize_parameters(variation)
+        self.reset()
+        return randomized
+
     def prime_current_trail(self, *, sample_count: int | None = None, dt: float, burn_in: int = 0, sample_stride: int = 1) -> np.ndarray:
         count = self.capacity if sample_count is None else max(0, min(int(sample_count), self.capacity))
         if count <= 0:
@@ -365,6 +385,30 @@ class AttractorManager:
         normalized *= np.float32(self.scale_hint)
         ages = np.linspace(0.02, 1.0, num=len(normalized), dtype=np.float32)
         return normalized.astype(np.float32, copy=False), ages
+
+    def get_trail_render_state(self, limit: int) -> TrailRenderState:
+        trail = self.get_recent_trail(limit)
+        if len(trail) == 0:
+            return TrailRenderState(
+                positions=np.empty((0, 3), dtype=np.float32),
+                center=(0.0, 0.0, 0.0),
+                inv_extent=1.0,
+                scale_hint=float(self.scale_hint),
+                count=0,
+            )
+
+        positions = trail.astype(np.float32, copy=False)
+        center = positions.mean(axis=0, dtype=np.float64)
+        centered = positions - center.astype(np.float32, copy=False)
+        extent = float(np.max(np.abs(centered)))
+        inv_extent = 1.0 if extent < 1e-6 else 1.0 / extent
+        return TrailRenderState(
+            positions=positions,
+            center=(float(center[0]), float(center[1]), float(center[2])),
+            inv_extent=inv_extent,
+            scale_hint=float(self.scale_hint),
+            count=len(positions),
+        )
 
     def get_projected_trail(
         self,

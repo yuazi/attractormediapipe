@@ -110,12 +110,23 @@ class SceneRendererTests(unittest.TestCase):
         renderer._hud_layout = lambda _names: layout
         renderer._render_atmosphere = lambda accent, fog: atmosphere_calls.append((accent, fog))
         renderer._ensure_point_capacity = lambda _byte_count: None
+        renderer._render_trail_points = lambda positions, **kwargs: SceneRenderer._render_trail_points(renderer, positions, **kwargs)
         renderer._draw_overlay = lambda *_args, **_kwargs: None
         renderer._draw_camera_frame = lambda *_args, **_kwargs: None
+        renderer._draw_focus_status_bar = lambda *_args, **_kwargs: None
 
         state = SceneState(
             positions=np.array([[0.1, -0.2, 0.3]], dtype=np.float32),
             ages=np.array([0.6], dtype=np.float32),
+            trail_center=(0.0, 0.0, 0.0),
+            trail_inv_extent=1.0,
+            trail_scale_hint=1.0,
+            transition_positions=np.empty((0, 3), dtype=np.float32),
+            transition_center=(0.0, 0.0, 0.0),
+            transition_inv_extent=1.0,
+            transition_scale_hint=1.0,
+            transition_color=(255, 88, 88),
+            transition_progress=1.0,
             attractor_name="Lorenz",
             attractor_color=(255, 88, 88),
             attractor_index=0,
@@ -137,8 +148,11 @@ class SceneRendererTests(unittest.TestCase):
             point_count=1,
             fps=60.0,
             paused=False,
+            ghost_mode=False,
             exporting=False,
             export_message="",
+            preset_name="nebula",
+            status_message="",
             show_overlay=False,
             show_shortcuts=False,
             show_camera=False,

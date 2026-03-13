@@ -129,6 +129,19 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_lerp_toward_reaches_target_over_configured_frames(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        value = 0.0
+        for _ in range(module.CONTROL_SMOOTHING_FRAMES):
+            value = module.lerp_toward(value, 12.0, frames=module.CONTROL_SMOOTHING_FRAMES)
+
+        self.assertGreater(value, 7.5)
+        self.assertLess(value, 12.0)
+
+        sys.modules.pop("main", None)
+
     def test_live_render_data_uses_fixed_trail_length(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
@@ -168,6 +181,8 @@ class MainModuleTests(unittest.TestCase):
                 "7680",
                 "--snapshot-height",
                 "4320",
+                "--preset",
+                "blueprint",
             ]
         )
 
@@ -179,6 +194,21 @@ class MainModuleTests(unittest.TestCase):
         self.assertEqual(result.textured_path, "/tmp/wallpaper_textured.png")
         self.assertEqual(captured["request"].width, 7680)
         self.assertEqual(captured["request"].height, 4320)
+        self.assertEqual(captured["request"].preset_name, "blueprint")
+
+        sys.modules.pop("main", None)
+
+    def test_run_snapshot_export_rejects_unknown_preset_with_valid_list(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        args = module.parse_args(["--snapshot-only", "--attractor", "Lorenz", "--preset", "bad_name"])
+
+        with self.assertRaises(SystemExit) as exc:
+            module.run_snapshot_export(args)
+
+        self.assertIn("Valid presets:", str(exc.exception))
+        self.assertIn("nebula", str(exc.exception))
 
         sys.modules.pop("main", None)
 

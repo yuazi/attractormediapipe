@@ -21,6 +21,7 @@ from config import (
     PIP_W,
     SCALE_RANGE,
     SPEED_RANGE,
+    TRAIL_DECAY,
     WIN_H,
     WIN_W,
 )
@@ -28,6 +29,7 @@ from hands.skeleton import draw_hand_skeleton
 
 from .background import get_background_layers
 from .common import compute_mvp
+from .gpu_stepper import TransformFeedbackTrailStepper
 
 
 FONT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "fonts"))
@@ -39,9 +41,12 @@ VERTEX_SHADER = """
 uniform mat4 u_mvp;
 uniform float u_time;
 uniform float u_point_scale;
+uniform vec3 u_center;
+uniform float u_inv_extent;
+uniform float u_scale_hint;
+uniform int u_point_count;
 
 in vec3 in_position;
-in float in_age;
 
 out float v_age;
 
@@ -56,15 +61,20 @@ mat3 rotationY(float angle) {
 }
 
 void main() {
-    float pulse = 1.0 + 0.045 * sin(u_time * 0.85 + in_age * 4.0);
+    float age = 1.0;
+    if (u_point_count > 1) {
+        age = clamp(float(gl_VertexID) / float(u_point_count - 1), 0.02, 1.0);
+    }
+    vec3 normalized = (in_position - u_center) * u_inv_extent * u_scale_hint;
+    float pulse = 1.0 + 0.045 * sin(u_time * 0.85 + age * 4.0);
     float drift = sin(u_time * 0.33) * 0.32;
-    vec3 animated = rotationY(drift) * (in_position * pulse);
+    vec3 animated = rotationY(drift) * (normalized * pulse);
     vec4 clip = u_mvp * vec4(animated, 1.0);
     gl_Position = clip;
 
     float depth = max(0.30, clip.w);
-    gl_PointSize = clamp((u_point_scale / depth) + 0.8 + in_age * 2.0, 1.0, 7.5);
-    v_age = in_age;
+    gl_PointSize = clamp((u_point_scale / depth) + 0.8 + age * 2.0, 1.0, 7.5);
+    v_age = age;
 }
 """
 
@@ -74,6 +84,8 @@ FRAGMENT_SHADER = """
 
 uniform vec3 u_color;
 uniform float u_luminosity;
+uniform float u_trail_decay;
+uniform float u_fade;
 
 in float v_age;
 out vec4 fragColor;
@@ -88,7 +100,8 @@ void main() {
     float halo = exp(-4.2 * r2);
     float core = pow(max(0.0, 1.0 - r2), 7.0);
     float glow = max(core, halo * 0.75);
-    float alpha = glow * mix(0.018, 0.15, v_age) * max(u_luminosity, 0.05);
+    float decay = mix(u_trail_decay, 1.0, v_age);
+    float alpha = glow * mix(0.018, 0.15, v_age) * max(u_luminosity, 0.05) * decay * u_fade;
     vec3 color = mix(u_color * 0.55, vec3(1.0), v_age * 0.28);
     fragColor = vec4(color, alpha);
 }
@@ -189,14 +202,18 @@ HUD_SHORTCUTS = (
     ("1-9", "Switch attractor"),
     ("R", "Reset trail"),
     ("SPACE", "Pause or resume"),
+    ("G", "Ghost orbit mode"),
+    ("P", "Cycle snapshot preset"),
     ("S", "Export 5K snapshot"),
     ("WHEEL", "Zoom"),
     ("L PINCH", "Speed"),
     ("L RING", "Luminosity"),
+    ("L HOLD", "Randomize"),
     ("R PALM", "Yaw and pitch"),
     ("R PINCH", "Scale"),
     ("R RING", "Fog"),
-    ("R PINKY", "Switch study"),
+    ("R TAP", "Next study"),
+    ("R HOLD", "Previous study"),
 )
 
 HUD_THEMES: dict[str, dict[str, object]] = {
@@ -227,6 +244,15 @@ class HUDLayout:
 class SceneState:
     positions: np.ndarray
     ages: np.ndarray
+    trail_center: tuple[float, float, float]
+    trail_inv_extent: float
+    trail_scale_hint: float
+    transition_positions: np.ndarray
+    transition_center: tuple[float, float, float]
+    transition_inv_extent: float
+    transition_scale_hint: float
+    transition_color: tuple[int, int, int]
+    transition_progress: float
     attractor_name: str
     attractor_color: tuple[int, int, int]
     attractor_index: int
@@ -248,8 +274,11 @@ class SceneState:
     point_count: int
     fps: float
     paused: bool
+    ghost_mode: bool
     exporting: bool
     export_message: str
+    preset_name: str
+    status_message: str
     show_overlay: bool
     show_shortcuts: bool
     show_camera: bool
@@ -300,7 +329,8 @@ class SceneRenderer:
 
         self.point_program = self.ctx.program(vertex_shader=VERTEX_SHADER, fragment_shader=FRAGMENT_SHADER)
         self.point_buffer = self.ctx.buffer(reserve=self._point_capacity)
-        self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f 1f", "in_position", "in_age")])
+        self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f", "in_position")])
+        self.gpu_stepper = TransformFeedbackTrailStepper.create_if_supported(self.ctx)
 
         self.quad_program = self.ctx.program(vertex_shader=QUAD_VERTEX_SHADER, fragment_shader=QUAD_FRAGMENT_SHADER)
         self.background_program = self.ctx.program(vertex_shader=QUAD_VERTEX_SHADER, fragment_shader=BACKGROUND_FRAGMENT_SHADER)
@@ -432,7 +462,7 @@ class SceneRenderer:
         self.point_buffer.release()
         self.point_buffer = self.ctx.buffer(reserve=self._point_capacity)
         self.point_vao.release()
-        self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f 1f", "in_position", "in_age")])
+        self.point_vao = self.ctx.vertex_array(self.point_program, [(self.point_buffer, "3f", "in_position")])
 
     def _render_quad_texture(
         self,
@@ -479,6 +509,39 @@ class SceneRenderer:
         self.background_program["u_rect"].value = tuple(float(value) for value in rect)
         self.background_vao.render()
 
+    def _render_trail_points(
+        self,
+        positions: np.ndarray,
+        *,
+        center: tuple[float, float, float],
+        inv_extent: float,
+        scale_hint: float,
+        color: tuple[int, int, int],
+        luminosity: float,
+        time_value: float,
+        fade: float,
+        mvp: np.ndarray,
+    ) -> None:
+        if len(positions) == 0 or fade <= 0.0:
+            return
+
+        vertex_data = np.asarray(positions, dtype=np.float32)
+        self._ensure_point_capacity(vertex_data.nbytes)
+        self.point_buffer.write(vertex_data.tobytes())
+        self.point_program["u_mvp"].write(mvp.T.astype(np.float32, copy=False).tobytes())
+        self.point_program["u_time"].value = float(time_value)
+        self.point_program["u_point_scale"].value = float(DEFAULT_POINT_SIZE)
+        self.point_program["u_luminosity"].value = float(luminosity)
+        self.point_program["u_color"].value = tuple(channel / 255.0 for channel in color)
+        self.point_program["u_center"].value = tuple(float(value) for value in center)
+        self.point_program["u_inv_extent"].value = float(inv_extent)
+        self.point_program["u_scale_hint"].value = float(scale_hint)
+        self.point_program["u_point_count"].value = int(len(vertex_data))
+        self.point_program["u_trail_decay"].value = float(TRAIL_DECAY)
+        self.point_program["u_fade"].value = float(max(0.0, min(1.0, fade)))
+        self.ctx.blend_func = self.moderngl.ONE, self.moderngl.ONE
+        self.point_vao.render(mode=self.moderngl.POINTS, vertices=len(vertex_data))
+
     def draw(self, state: SceneState) -> None:
         self._sync_window_size()
         accent = self._hud_accent(state.attractor_name, state.attractor_color)
@@ -492,27 +555,37 @@ class SceneRenderer:
             self._fps_history.append(state.fps)
             self._fps_history = self._fps_history[-5:]
 
-        if len(state.positions) > 0:
-            vertex_data = np.empty((len(state.positions), 4), dtype=np.float32)
-            vertex_data[:, :3] = state.positions
-            vertex_data[:, 3] = state.ages
-            self._ensure_point_capacity(vertex_data.nbytes)
-            self.point_buffer.write(vertex_data.tobytes())
-            mvp = compute_mvp(
-                self.width,
-                self.height,
-                yaw=state.yaw,
-                pitch=state.pitch,
-                roll=state.roll,
-                zoom=state.zoom,
+        mvp = compute_mvp(
+            self.width,
+            self.height,
+            yaw=state.yaw,
+            pitch=state.pitch,
+            roll=state.roll,
+            zoom=state.zoom,
+        )
+        if len(state.transition_positions) > 0 and state.transition_progress < 1.0:
+            self._render_trail_points(
+                state.transition_positions,
+                center=state.transition_center,
+                inv_extent=state.transition_inv_extent,
+                scale_hint=state.transition_scale_hint,
+                color=state.transition_color,
+                luminosity=state.luminosity,
+                time_value=state.time_value,
+                fade=1.0 - state.transition_progress,
+                mvp=mvp,
             )
-            self.point_program["u_mvp"].write(mvp.T.astype(np.float32, copy=False).tobytes())
-            self.point_program["u_time"].value = float(state.time_value)
-            self.point_program["u_point_scale"].value = float(DEFAULT_POINT_SIZE)
-            self.point_program["u_luminosity"].value = float(state.luminosity)
-            self.point_program["u_color"].value = tuple(channel / 255.0 for channel in state.attractor_color)
-            self.ctx.blend_func = self.moderngl.ONE, self.moderngl.ONE
-            self.point_vao.render(mode=self.moderngl.POINTS, vertices=len(state.positions))
+        self._render_trail_points(
+            state.positions,
+            center=state.trail_center,
+            inv_extent=state.trail_inv_extent,
+            scale_hint=state.trail_scale_hint,
+            color=state.attractor_color,
+            luminosity=state.luminosity,
+            time_value=state.time_value,
+            fade=state.transition_progress,
+            mvp=mvp,
+        )
 
         if state.show_overlay and not state.focus_mode and state.show_camera and state.pip_frame is not None:
             self._draw_camera_frame(
@@ -535,6 +608,8 @@ class SceneRenderer:
                 state.right_pip_caption,
                 rect=layout.pip_rect,
             )
+        if state.focus_mode:
+            self._draw_focus_status_bar(state, accent)
 
     def _render_atmosphere(self, accent: tuple[int, int, int], fog: float) -> None:
         cache_key = (self.width, self.height, accent)
@@ -804,7 +879,7 @@ class SceneRenderer:
         draw.line((left + 1, top, right - 1, top), fill=self._rgba(accent, 255), width=1)
         draw.text((left + s(18), top + s(12)), "PARAMETERS", font=self._font_mono_9, fill=self._rgba(accent, 188))
 
-        live_label = "EXPORT" if state.exporting else "PAUSED" if state.paused else "LIVE"
+        live_label = "EXPORT" if state.exporting else "GHOST" if state.ghost_mode else "PAUSED" if state.paused else "LIVE"
         live_x = right - s(76)
         live_y = top + s(12)
         self._draw_dot(draw, (live_x, live_y + s(5)), max(2, s(2)), accent, glow=s(8))
@@ -946,9 +1021,42 @@ class SceneRenderer:
         status_text = f"{state.point_count:,} PTS"
         if state.exporting:
             status_text = "EXPORTING"
+        elif state.ghost_mode:
+            status_text = "GHOST"
         elif state.paused:
             status_text = "PAUSED"
+        elif state.status_message:
+            status_text = state.status_message
         draw.text((base_x + total_width + s(78), base_y - s(10)), status_text, font=self._font_mono_8, fill=self._rgba(accent, 140))
+
+        preset_label = state.preset_name.upper()
+        preset_width = self._text_width(preset_label, self._font_mono_8)
+        draw.text((self.width - s(28) - preset_width, base_y - s(10)), preset_label, font=self._font_mono_8, fill=self._rgba(HUD_WHITE, 160))
+
+    def _draw_focus_status_bar(self, state: SceneState, accent: tuple[int, int, int]) -> None:
+        image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        s = self._s
+        bar_height = s(26)
+        top = self.height - bar_height
+        draw.rectangle((0, top, self.width, self.height), fill=self._rgba(HUD_PANEL_BG, 168))
+        draw.line((0, top, self.width, top), fill=self._rgba(accent, 144), width=1)
+
+        parts = [
+            self._hud_label(state.attractor_name).upper(),
+            f"PRESET {state.preset_name.upper()}",
+            f"{state.fps:0.1f} FPS",
+        ]
+        if state.ghost_mode:
+            parts.append("GHOST")
+        if state.status_message:
+            parts.append(state.status_message)
+        label = "  ·  ".join(parts)
+        draw.text((s(18), top + s(8)), label, font=self._font_mono_9, fill=self._rgba(HUD_WHITE, 226))
+
+        image = image.transpose(Image.FLIP_TOP_BOTTOM)
+        self.overlay_texture.write(image.tobytes())
+        self._render_quad_texture(self.overlay_texture, (0, 0, self.width, self.height))
 
     def _draw_pip_panel(self, draw: ImageDraw.ImageDraw, state: SceneState, layout: HUDLayout, accent: tuple[int, int, int]) -> None:
         s = self._s
@@ -1242,6 +1350,8 @@ class SceneRenderer:
         return self.clock.get_fps()
 
     def quit(self) -> None:
+        if self.gpu_stepper is not None:
+            self.gpu_stepper.release()
         self.camera_texture.release()
         self.background_texture.release()
         self.fog_texture.release()

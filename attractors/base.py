@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
+import random
 from typing import Iterable
 
 import numpy as np
@@ -52,11 +53,32 @@ class Attractor(ABC):
         clone.state = self.state.copy()
         return clone
 
+    @classmethod
+    def default_parameter_dict(cls) -> dict[str, float]:
+        return cls().parameter_dict()
+
     def reset(self) -> None:
         self.state = np.array(self.initial_state(), dtype=np.float64)
 
     def set_state(self, state: Iterable[float]) -> None:
         self.state = np.array(tuple(state), dtype=np.float64)
+
+    def set_parameters(self, parameters: dict[str, float]) -> None:
+        for key, value in parameters.items():
+            setattr(self, key, float(value))
+
+    def randomize_parameters(self, variation: float = 0.2, rng: random.Random | None = None) -> dict[str, float]:
+        generator = rng or random.Random()
+        randomized: dict[str, float] = {}
+        for key, default_value in self.default_parameter_dict().items():
+            magnitude = abs(float(default_value))
+            if magnitude < 1e-12:
+                randomized[key] = float(default_value)
+                continue
+            spread = magnitude * max(0.0, float(variation))
+            randomized[key] = float(generator.uniform(default_value - spread, default_value + spread))
+        self.set_parameters(randomized)
+        return randomized
 
     def derivative(self, state: np.ndarray) -> np.ndarray:
         if self.kernel_derivative is None:

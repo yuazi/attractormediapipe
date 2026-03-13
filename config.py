@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from screenshot.presets import available_snapshot_presets
+
 WIN_W = 1800
 WIN_H = 1100
 FPS = 60
 
 DEFAULT_DT = 0.005
 MAX_SPEED_POINTS_PER_MINUTE = 500_000
-SMOOTH_ALPHA = 0.08
+CONTROL_SMOOTHING_FRAMES = 12
 DEFAULT_POINT_SIZE = 2.8
+TRAIL_DECAY = 0.9
 
 PARTICLE_SIZE_MAX = 7
 PARTICLE_SIZE_MIN = 1
@@ -62,11 +65,15 @@ BLOOM_ALPHA = 24
 CAPTION = "(y)us particle attractor"
 SCREENSHOT_PREFIX = "attractor"
 SCREENSHOT_DIR = "screenshot"
+SNAPSHOT_LOG_PATH = "assets/snapshot_log.jsonl"
 SNAPSHOT_WIDTH = 5120
 SNAPSHOT_HEIGHT = 2880
 SNAPSHOT_SAMPLES = LIVE_SAMPLE_COUNT
 SNAPSHOT_BURN_IN = 25_000
 SNAPSHOT_SAMPLE_STRIDE = 1
+DEFAULT_SNAPSHOT_PRESET = "nebula"
+SNAPSHOT_PRESET_NAMES = available_snapshot_presets()
+PRESET_HUD_FLASH_SECONDS = 2.0
 
 HELP_LINES = [
     "LEFT HAND",
@@ -82,9 +89,9 @@ HELP_LINES = [
     "Pinky touch palm -> Switch attractor",
     "",
     "KEYS",
-    "[1-9] switch  [R] restart trail  [SPACE] pause",
+    "[1-9] switch  [R] restart trail  [SPACE] pause/resume",
     "[H] shortcuts  [C] camera  [M] pip mode",
-    "[S] snapshot",
+    "[S] snapshot  [P] preset  [G] ghost",
     "[ESC] quit  [ARROWS] rotate",
     "[+/-] speed  [,/.] fog  [WHEEL] zoom",
 ]

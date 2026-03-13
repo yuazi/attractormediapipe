@@ -5,6 +5,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from attractors import AttractorManager, active_attractor_names
 from config import (
     CAMERA_CAPTURE_FPS,
@@ -15,6 +17,7 @@ from config import (
     DEFAULT_LUMINOSITY,
     DEFAULT_PITCH,
     DEFAULT_ROLL,
+    DEFAULT_SNAPSHOT_PRESET,
     DEFAULT_SCALE,
     DEFAULT_SPEED,
     DEFAULT_YAW,
@@ -23,18 +26,21 @@ from config import (
     FOG_STEP_DELTA,
     HAND_TRACKING_FPS,
     MAX_SPEED_POINTS_PER_MINUTE,
+    PRESET_HUD_FLASH_SECONDS,
     SCALE_RANGE,
     SNAPSHOT_BURN_IN,
     SNAPSHOT_HEIGHT,
+    SNAPSHOT_PRESET_NAMES,
     SNAPSHOT_SAMPLE_STRIDE,
     SNAPSHOT_SAMPLES,
     SNAPSHOT_WIDTH,
-    SMOOTH_ALPHA,
+    CONTROL_SMOOTHING_FRAMES,
     SPEED_RANGE,
     PITCH_RANGE,
     YAW_RANGE,
 )
 from hands import GestureInterpreter
+from screenshot import cycle_snapshot_preset, get_snapshot_preset
 
 SWITCH_CAPTION_DURATION = 0.85
 KEYBOARD_YAW_STEP = 8.0
@@ -42,6 +48,11 @@ KEYBOARD_PITCH_STEP = 6.0
 KEYBOARD_YAW_HOLD_RATE = 135.0
 KEYBOARD_PITCH_HOLD_RATE = 100.0
 AUTO_CAMERA_SCAN_LIMIT = 5
+
+
+def lerp_toward(current: float, target: float, *, frames: int = CONTROL_SMOOTHING_FRAMES) -> float:
+    remaining_frames = max(1, int(frames))
+    return current + (target - current) / remaining_frames
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -59,6 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--snapshot-samples", type=int, default=None, help="Override the default Datashader sample count")
     parser.add_argument("--snapshot-burn-in", type=int, default=None, help="Override the default Datashader burn-in steps")
     parser.add_argument("--snapshot-stride", type=int, default=None, help="Override the default Datashader sample stride")
+    parser.add_argument("--preset", type=str, default=DEFAULT_SNAPSHOT_PRESET, help=f"Snapshot preset ({', '.join(SNAPSHOT_PRESET_NAMES)})")
     return parser.parse_args(argv)
 
 
@@ -72,6 +84,7 @@ class ControlState:
     fog: float = DEFAULT_FOG
     luminosity: float = DEFAULT_LUMINOSITY
     paused: bool = False
+    ghost_mode: bool = False
     show_overlay: bool = True
     show_shortcuts: bool = True
     show_camera: bool = True
@@ -90,11 +103,15 @@ class ControlState:
     def set_target(self, name: str, value: float) -> None:
         self._targets[name] = value
 
-    def smooth(self, alpha: float = SMOOTH_ALPHA) -> None:
+    def smooth(self, frames: int = CONTROL_SMOOTHING_FRAMES, alpha: float | None = None) -> None:
         for key in ("yaw", "pitch", "zoom", "speed", "fog", "luminosity"):
             current = getattr(self, key)
             target = self._targets[key]
-            setattr(self, key, current + alpha * (target - current))
+            if alpha is not None:
+                value = current + alpha * (target - current)
+            else:
+                value = lerp_toward(current, target, frames=frames)
+            setattr(self, key, value)
         self.zoom = max(SCALE_RANGE[0], min(SCALE_RANGE[1], self.zoom))
         self.speed = max(SPEED_RANGE[0], min(SPEED_RANGE[1], self.speed))
         self.fog = max(FOG_RANGE[0], min(FOG_RANGE[1], self.fog))
@@ -300,12 +317,24 @@ def _apply_slider_control(controls: ControlState, slider_id: str, value: float) 
         controls.set_target("zoom", value)
 
 
+def _resolve_snapshot_preset_name(name: str) -> str:
+    try:
+        return get_snapshot_preset(name).name
+    except KeyError as exc:
+        valid = ", ".join(SNAPSHOT_PRESET_NAMES)
+        raise SystemExit(f"{exc.args[0]}. Valid presets: {valid}") from exc
+
+
 def _resolve_snapshot_dimensions(args: argparse.Namespace) -> tuple[int, int]:
     width = SNAPSHOT_WIDTH if args.snapshot_width is None else args.snapshot_width
     height = SNAPSHOT_HEIGHT if args.snapshot_height is None else args.snapshot_height
     if width < 1 or height < 1:
         raise SystemExit("snapshot dimensions must be >= 1")
     return width, height
+
+
+def _get_live_trail_state(manager: AttractorManager):
+    return manager.get_trail_render_state(FIXED_TRAIL_LENGTH)
 
 
 def run_snapshot_export(args: argparse.Namespace):
@@ -322,6 +351,7 @@ def run_snapshot_export(args: argparse.Namespace):
     burn_in = SNAPSHOT_BURN_IN if args.snapshot_burn_in is None else args.snapshot_burn_in
     sample_stride = SNAPSHOT_SAMPLE_STRIDE if args.snapshot_stride is None else args.snapshot_stride
     width, height = _resolve_snapshot_dimensions(args)
+    preset_name = _resolve_snapshot_preset_name(args.preset)
     try:
         request = SnapshotRequest(
             attractor_name=attractor_name,
@@ -338,6 +368,7 @@ def run_snapshot_export(args: argparse.Namespace):
             sample_count=sample_count,
             burn_in=burn_in,
             sample_stride=sample_stride,
+            preset_name=preset_name,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -361,6 +392,7 @@ def _restart_current_trail(manager: AttractorManager) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    preset_name = _resolve_snapshot_preset_name(args.preset)
     snapshot_width, snapshot_height = _resolve_snapshot_dimensions(args)
     if args.snapshot_only or (args.headless and args.screenshot_path):
         run_snapshot_export(args)
@@ -399,8 +431,11 @@ def main(argv: list[str] | None = None) -> None:
     hover_reset = False
     hover_shortcuts_toggle = False
     hover_pip = False
-    left_reset_caption_until = 0.0
-    right_switch_caption_until = 0.0
+    left_pip_caption_text = "Speed"
+    left_pip_caption_until = 0.0
+    right_pip_caption_text = "Scale"
+    right_pip_caption_until = 0.0
+    preset_caption_until = 0.0
 
     try:
         while running:
@@ -418,7 +453,14 @@ def main(argv: list[str] | None = None) -> None:
                     if event.key == pygame.K_ESCAPE:
                         running = False
                     elif event.key == pygame.K_SPACE:
-                        controls.paused = not controls.paused
+                        if controls.ghost_mode:
+                            controls.ghost_mode = False
+                        else:
+                            controls.paused = not controls.paused
+                    elif event.key == pygame.K_g:
+                        controls.ghost_mode = not controls.ghost_mode
+                        if controls.ghost_mode:
+                            controls.paused = False
                     elif event.key == pygame.K_r:
                         _restart_current_trail(manager)
                         sample_budget = 0.0
@@ -436,8 +478,12 @@ def main(argv: list[str] | None = None) -> None:
                                 width=snapshot_width,
                                 height=snapshot_height,
                                 state=manager.state_vector,
+                                preset_name=preset_name,
                             )
                         )
+                    elif event.key == pygame.K_p:
+                        preset_name = cycle_snapshot_preset(preset_name)
+                        preset_caption_until = time.monotonic() + PRESET_HUD_FLASH_SECONDS
                     elif event.key == pygame.K_h:
                         controls.show_shortcuts = not controls.show_shortcuts
                     elif event.key == pygame.K_c:
@@ -559,30 +605,51 @@ def main(argv: list[str] | None = None) -> None:
             _apply_held_rotation_controls(controls, horizontal=horizontal, vertical=vertical, frame_delta=frame_delta)
 
             if gesture_frame.reset_current:
-                left_reset_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
+                left_pip_caption_text = "Reset"
+                left_pip_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
                 _restart_current_trail(manager)
                 sample_budget = 0.0
             if gesture_frame.scene_delta:
                 switch_now = time.monotonic()
-                right_switch_caption_until = switch_now + SWITCH_CAPTION_DURATION
+                right_pip_caption_text = "Switch"
+                right_pip_caption_until = switch_now + SWITCH_CAPTION_DURATION
                 manager.switch_relative(gesture_frame.scene_delta)
                 _prime_live_trail(manager)
                 sample_budget = 0.0
 
             controls.smooth()
 
-            if not controls.paused:
+            if not controls.paused and not controls.ghost_mode:
                 steps, sample_budget = _consume_sample_budget(sample_budget, controls.speed, frame_delta)
                 if steps > 0:
-                    manager.step_many(DEFAULT_DT * controls.speed, steps)
-            positions, ages = _get_live_render_data(manager)
+                    step_dt = DEFAULT_DT * controls.speed
+                    if renderer.gpu_stepper is not None:
+                        try:
+                            samples, final_state = renderer.gpu_stepper.generate(
+                                attractor_name=manager.name,
+                                state=manager.state_vector,
+                                dt=step_dt,
+                                parameters=manager.current.parameter_dict(),
+                                steps=steps,
+                            )
+                        except Exception:
+                            renderer.gpu_stepper.release()
+                            renderer.gpu_stepper = None
+                            manager.step_many(step_dt, steps)
+                        else:
+                            manager.append_external_samples(samples, final_state)
+                    else:
+                        manager.step_many(step_dt, steps)
+            trail_state = _get_live_trail_state(manager)
+            ages = np.empty((0,), dtype=np.float32)
             caption_now = time.monotonic()
-            left_pip_caption = "Reset" if caption_now < left_reset_caption_until else "Speed"
-            right_pip_caption = "Switch" if caption_now < right_switch_caption_until else "Scale"
+            left_pip_caption = left_pip_caption_text if caption_now < left_pip_caption_until else "Speed"
+            right_pip_caption = right_pip_caption_text if caption_now < right_pip_caption_until else "Scale"
+            status_message = f"PRESET {preset_name.upper()}" if caption_now < preset_caption_until else ""
 
             renderer.draw(
                 SceneState(
-                    positions=positions,
+                    positions=trail_state.positions,
                     ages=ages,
                     attractor_name=manager.name,
                     attractor_color=manager.color,
@@ -605,8 +672,11 @@ def main(argv: list[str] | None = None) -> None:
                     point_count=manager.count,
                     fps=renderer.clock.get_fps(),
                     paused=controls.paused,
+                    ghost_mode=controls.ghost_mode,
                     exporting=snapshotter.is_running,
                     export_message=snapshotter.message,
+                    preset_name=preset_name,
+                    status_message=status_message,
                     show_overlay=controls.show_overlay,
                     show_shortcuts=controls.show_shortcuts,
                     show_camera=controls.show_camera,
@@ -625,6 +695,15 @@ def main(argv: list[str] | None = None) -> None:
                     left_pip_caption=left_pip_caption,
                     right_pip_caption=right_pip_caption,
                     time_value=animation_time,
+                    trail_center=trail_state.center,
+                    trail_inv_extent=trail_state.inv_extent,
+                    trail_scale_hint=trail_state.scale_hint,
+                    transition_positions=np.empty((0, 3), dtype=np.float32),
+                    transition_center=(0.0, 0.0, 0.0),
+                    transition_inv_extent=1.0,
+                    transition_scale_hint=1.0,
+                    transition_progress=1.0,
+                    transition_color=manager.color,
                 )
             )
 
