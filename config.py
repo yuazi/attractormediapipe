@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
 WIN_W = 1800
 WIN_H = 1100
 FPS = 60
@@ -18,21 +15,12 @@ PARTICLE_ALPHA_MAX = 128
 PARTICLE_ALPHA_MIN = 8
 GLOW_SPRITE_SIZE = 48
 
-MIN_TRAIL = 20_000
 LIVE_SAMPLE_COUNT = 5_000_000
-MAX_TRAIL = 500_000
-DEFAULT_TRAIL = 20_000
-TRAIL_STEP_DELTA = 1000
 TRAIL_BUFFER_CAPACITY = LIVE_SAMPLE_COUNT
-PARTICLE_COUNT_RANGE = (1, 10)
-DEFAULT_PARTICLE_COUNT = 5
 FIXED_TRAIL_LENGTH = 100_000
 
 PIP_W = 400
 PIP_H = 225
-PIP_MARGIN = 12
-OVERLAY_W = 700
-OVERLAY_H = 260
 
 CAMERA_FRAME_WIDTH = 960
 CAMERA_FRAME_HEIGHT = 540
@@ -42,20 +30,9 @@ TRACKING_FRAME_HEIGHT = 360
 HAND_TRACKING_FPS = 24
 
 BACKGROUND_COLOR = (0, 0, 0)
-HUD_PANEL_COLOR = (10, 12, 18, 206)
-HUD_PANEL_BORDER = (132, 109, 73)
-HUD_TEXT = (244, 236, 219)
-HUD_MUTED = (168, 149, 116)
-HUD_BAR_BG = (42, 34, 24)
-HUD_BAR_FILL = (232, 190, 102)
-HUD_HELP_TEXT = (223, 209, 184)
-STATUS_OK = (239, 209, 129)
-STATUS_LOST = (136, 112, 82)
-PIP_BORDER_COLOR = (154, 124, 86, 124)
 SKELETON_COLOR = (255, 255, 255)
 
 CAMERA_DISTANCE = 5.0
-CAMERA_FOV = 520.0
 
 DEFAULT_LUMINOSITY = 0.82
 DEFAULT_FOG = 1.0
@@ -111,23 +88,3 @@ HELP_LINES = [
     "[ESC] quit  [ARROWS] rotate",
     "[+/-] speed  [,/.] fog  [WHEEL] zoom",
 ]
-
-
-@dataclass(frozen=True)
-class AttractorSpec:
-    name: str
-    color: tuple[int, int, int]
-    scale_hint: float
-
-
-ATTRACTOR_SPECS = (
-    AttractorSpec("Lorenz", (255, 88, 88), 1.0),
-    AttractorSpec("Aizawa", (255, 177, 74), 2.0),
-    AttractorSpec("Sprott B", (226, 112, 255), 1.2),
-    AttractorSpec("Thomas", (98, 255, 229), 1.5),
-    AttractorSpec("Dadras", (89, 164, 255), 1.0),
-    AttractorSpec("Chen", (77, 115, 255), 1.0),
-    AttractorSpec("Langford", (255, 86, 171), 2.0),
-    AttractorSpec("Rossler", (255, 215, 90), 1.2),
-    AttractorSpec("Halvorsen", (255, 203, 98), 0.8),
-)

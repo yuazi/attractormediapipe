@@ -115,9 +115,22 @@ class CameraTrackerSession:
         self._lock = threading.Lock()
         self._capture_lock = threading.Lock()
         self._running = True
-        self._snapshot = CameraSnapshot(frame=None, hand_data={"left": None, "right": None})
+        self._snapshot = CameraSnapshot(frame=None, hand_data=self._empty_hand_data())
         self._worker = threading.Thread(target=self._run, name="camera-tracker", daemon=True)
         self._worker.start()
+
+    @staticmethod
+    def _empty_hand_data() -> dict:
+        return {"left": None, "right": None}
+
+    def _clear_snapshot(self) -> None:
+        with self._lock:
+            self._snapshot = CameraSnapshot(frame=None, hand_data=self._empty_hand_data())
+
+    def _disable_camera(self, exc: Exception) -> None:
+        self._running = False
+        self._clear_snapshot()
+        print(f"Camera disabled: {exc}")
 
     def _run(self) -> None:
         while self._running:
@@ -126,7 +139,8 @@ class CameraTrackerSession:
                     if not self._running or self.capture is None:
                         break
                     ok, raw_frame = self.capture.read()
-            except Exception:
+            except Exception as exc:
+                self._disable_camera(exc)
                 break
 
             if not self._running:
@@ -135,8 +149,12 @@ class CameraTrackerSession:
                 time.sleep(0.01)
                 continue
 
-            camera_frame = self.cv2.flip(raw_frame, 1)
-            hand_data = self.tracker.process(camera_frame)
+            try:
+                camera_frame = self.cv2.flip(raw_frame, 1)
+                hand_data = self.tracker.process(camera_frame)
+            except Exception as exc:
+                self._disable_camera(exc)
+                break
             with self._lock:
                 self._snapshot = CameraSnapshot(frame=camera_frame, hand_data=hand_data)
 

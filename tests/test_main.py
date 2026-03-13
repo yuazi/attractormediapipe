@@ -289,6 +289,56 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
+    def test_camera_session_clears_snapshot_when_tracker_processing_fails(self) -> None:
+        sys.modules.pop("main", None)
+        module = importlib.import_module("main")
+
+        class FakeCapture:
+            def __init__(self) -> None:
+                self.released = False
+
+            def read(self):
+                return True, object()
+
+            def release(self) -> None:
+                self.released = True
+
+        class FakeTracker:
+            def __init__(self) -> None:
+                self.closed = False
+                self.process_called = threading.Event()
+
+            def process(self, _frame):
+                self.process_called.set()
+                raise RuntimeError("tracker failed")
+
+            def close(self) -> None:
+                self.closed = True
+
+        capture = FakeCapture()
+        tracker = FakeTracker()
+        fake_cv2 = types.SimpleNamespace(flip=lambda frame, _axis: frame)
+
+        with mock.patch("builtins.print") as print_mock:
+            session = module.CameraTrackerSession(capture, tracker, fake_cv2)
+            self.assertTrue(tracker.process_called.wait(timeout=1.0))
+            session._worker.join(timeout=1.0)
+
+            self.assertFalse(session._worker.is_alive())
+            self.assertFalse(session._running)
+            snapshot = session.snapshot()
+            self.assertIsNone(snapshot.frame)
+            self.assertEqual(snapshot.hand_data, {"left": None, "right": None})
+            print_mock.assert_called_once()
+            self.assertIn("tracker failed", print_mock.call_args[0][0])
+
+            session.close()
+
+        self.assertTrue(capture.released)
+        self.assertTrue(tracker.closed)
+
+        sys.modules.pop("main", None)
+
     def test_maybe_create_camera_session_disables_camera_when_tracker_init_fails(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
