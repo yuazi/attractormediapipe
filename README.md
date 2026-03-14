@@ -151,25 +151,26 @@ python3 main.py --frames 300
 Export a snapshot and exit:
 
 ```bash
-python3 main.py --snapshot-only --attractor Lorenz --preset blueprint --screenshot-path assets/lorenz_blueprint.png
+python3 main.py --snapshot-only --attractor Lorenz --preset blueprint --screenshot-path screenshot/lorenz_blueprint.png
 ```
 
 Export with a larger wallpaper resolution:
 
 ```bash
-python3 main.py --snapshot-only --attractor Langford --snapshot-width 7680 --snapshot-height 4320 --preset nebula --screenshot-path assets/langford_8k.png
+python3 main.py --snapshot-only --attractor Lorenz --snapshot-width 7680 --snapshot-height 4320 --preset nebula --snapshot-fit contain --screenshot-path screenshot/lorenz_8k.png
 ```
 
 Headless export uses the same snapshot renderer:
 
 ```bash
-python3 main.py --headless --attractor Chen --preset void --screenshot-path assets/chen_void.png
+python3 main.py --headless --attractor Chen --preset void --screenshot-path screenshot/chen_void.png
 ```
 
 ### Important snapshot notes
 
 - `--headless` currently requires `--snapshot-only` or `--screenshot-path`.
 - Invalid preset names exit cleanly and print the valid preset list.
+- `--snapshot-fit cover` fills the frame and may crop; `--snapshot-fit contain` keeps the full attractor visible with margin.
 - Snapshot filenames default to the `screenshot/` directory with a timestamped base name.
 - If `--screenshot-path` is provided, the code preserves the `_clean` / `_textured` naming convention automatically.
 
@@ -190,6 +191,7 @@ python3 main.py --headless --attractor Chen --preset void --screenshot-path asse
 | `--snapshot-samples` | Override Datashader point count. |
 | `--snapshot-burn-in` | Override burn-in steps before sampling. |
 | `--snapshot-stride` | Override sample stride. |
+| `--snapshot-fit` | Choose `cover` to fill the frame or `contain` to keep the full attractor visible. |
 | `--preset` | Select one of `nebula`, `blueprint`, `void`, or `print`. |
 
 ## Controls

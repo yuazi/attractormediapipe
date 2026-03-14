@@ -10,6 +10,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from PIL import Image
@@ -53,6 +54,7 @@ class SnapshotRequest:
     dt: float = DEFAULT_DT
     state: tuple[float, float, float] | None = None
     preset_name: str = DEFAULT_SNAPSHOT_PRESET
+    fit_mode: Literal["cover", "contain"] = "cover"
 
     def __post_init__(self) -> None:
         if self.width < 1 or self.height < 1:
@@ -67,6 +69,8 @@ class SnapshotRequest:
             raise ValueError("dt must be > 0")
         if not 0.0 <= self.fog <= 1.0:
             raise ValueError("fog must be within [0.0, 1.0]")
+        if self.fit_mode not in {"cover", "contain"}:
+            raise ValueError("fit_mode must be one of: cover, contain")
         try:
             get_snapshot_preset(self.preset_name)
         except KeyError as exc:
@@ -169,6 +173,46 @@ def _palette_lookup(values: np.ndarray, preset_name: str) -> np.ndarray:
     return np.stack(channels, axis=1).astype(np.float32, copy=False)
 
 
+def _render_snapshot_backdrop(shape: tuple[int, int], preset_name: str, luminosity: float) -> np.ndarray:
+    height, width = shape
+    preset = get_snapshot_preset(preset_name)
+    base = np.asarray(preset.background, dtype=np.float32) / np.float32(255.0)
+
+    backdrop = np.empty((height, width, 3), dtype=np.float32)
+    backdrop[...] = base
+    if preset.name == "print":
+        return backdrop
+
+    palette = np.array([stop[1] for stop in preset.palette], dtype=np.float32) / np.float32(255.0)
+    mid = palette[len(palette) // 2]
+    glow = palette[-1]
+    shadow = palette[1] if len(palette) > 1 else palette[0]
+
+    y = np.linspace(0.0, 1.0, height, dtype=np.float32)[:, None]
+    x = np.linspace(0.0, 1.0, width, dtype=np.float32)[None, :]
+
+    luminosity_gain = np.float32(0.04 + 0.05 * max(0.05, luminosity))
+    sky = np.power(1.0 - y, 1.6) * (0.72 + 0.28 * np.cos((x - np.float32(0.22)) * np.float32(np.pi)))
+    backdrop += sky[..., None] * (mid * luminosity_gain)
+
+    horizon = np.exp(-((y - np.float32(0.74)) * np.float32(4.6)) ** 2) * np.exp(
+        -((x - np.float32(0.52)) * np.float32(2.1)) ** 2
+    )
+    backdrop += horizon[..., None] * (glow * np.float32(0.045 + 0.025 * max(0.05, luminosity)))
+
+    low_glow = np.exp(-((y - np.float32(0.94)) * np.float32(6.4)) ** 2)
+    backdrop += low_glow[..., None] * (shadow * np.float32(0.018))
+
+    if preset.name == "blueprint":
+        grid_x = np.power(0.5 + 0.5 * np.cos(x * np.float32(56.0)), 16.0)
+        grid_y = np.power(0.5 + 0.5 * np.cos(y * np.float32(42.0)), 16.0)
+        grid = np.maximum(grid_x, grid_y)
+        backdrop += grid[..., None] * (glow * np.float32(0.018))
+
+    np.clip(backdrop, 0.0, 1.0, out=backdrop)
+    return backdrop
+
+
 def _render_density_image(density: np.ndarray, luminosity: float, preset_name: str) -> np.ndarray:
     density = np.asarray(density, dtype=np.float32)
     density = np.flipud(density)
@@ -177,7 +221,7 @@ def _render_density_image(density: np.ndarray, luminosity: float, preset_name: s
     density_norm = np.clip(density_log / peak, 0.0, 1.0)
     preset = get_snapshot_preset(preset_name)
     palette_rgb = _palette_lookup(density_norm.reshape(-1), preset_name).reshape(density.shape[0], density.shape[1], 3)
-    background = (np.asarray(preset.background, dtype=np.float32) / np.float32(255.0)).reshape(1, 1, 3)
+    background = _render_snapshot_backdrop(density.shape, preset_name, luminosity)
 
     if preset.name == "print":
         ink = np.power(palette_rgb, 1.04)
@@ -245,6 +289,29 @@ def _cover_frame_points(points_2d: np.ndarray, overscan: float = 1.02) -> np.nda
     cover_extent = min_extent if min_extent >= 1e-6 else max_extent
     scale = np.float32(overscan / cover_extent)
     return (centered * scale).astype(np.float32, copy=False)
+
+
+def _contain_frame_points(points_2d: np.ndarray, inset: float = 0.98) -> np.ndarray:
+    if len(points_2d) == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    coords = np.asarray(points_2d, dtype=np.float32)
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0)
+    center = (mins + maxs) * np.float32(0.5)
+    centered = coords - center
+    half_extents = np.max(np.abs(centered), axis=0)
+    max_extent = float(np.max(half_extents))
+    if max_extent < 1e-6:
+        return centered.astype(np.float32, copy=False)
+    scale = np.float32(inset / max_extent)
+    return (centered * scale).astype(np.float32, copy=False)
+
+
+def _frame_snapshot_points(points_2d: np.ndarray, fit_mode: Literal["cover", "contain"]) -> np.ndarray:
+    if fit_mode == "contain":
+        return _contain_frame_points(points_2d)
+    return _cover_frame_points(points_2d)
 
 
 def _snapshot_timestamp() -> str:
@@ -330,7 +397,7 @@ def export_attractor_snapshot(request: SnapshotRequest) -> SnapshotExportResult:
     if not np.any(in_bounds):
         raise RuntimeError("Snapshot export produced no visible points in bounds")
 
-    framed = _cover_frame_points(ndc[in_bounds, :2])
+    framed = _frame_snapshot_points(ndc[in_bounds, :2], request.fit_mode)
     reframed_in_bounds = (
         (framed[:, 0] >= -1.0)
         & (framed[:, 0] <= 1.0)

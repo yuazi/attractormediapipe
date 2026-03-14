@@ -16,6 +16,7 @@ from renderer.snapshot import (
     SnapshotController,
     SnapshotExportResult,
     SnapshotRequest,
+    _contain_frame_points,
     _cover_frame_points,
     _render_density_image,
     ensure_snapshot_environment,
@@ -89,6 +90,23 @@ class SnapshotTests(unittest.TestCase):
         self.assertGreaterEqual(float(np.max(covered[:, 1])), 1.0)
         self.assertGreater(float(np.max(np.abs(covered[:, 0]))), 1.0)
 
+    def test_contain_frame_points_keeps_full_shape_in_snapshot_bounds(self) -> None:
+        points = np.array(
+            [
+                [-0.30, -0.10],
+                [0.30, -0.10],
+                [-0.30, 0.10],
+                [0.30, 0.10],
+            ],
+            dtype=np.float32,
+        )
+
+        contained = _contain_frame_points(points, inset=0.98)
+
+        self.assertLessEqual(float(np.max(np.abs(contained[:, 0]))), 1.0)
+        self.assertLessEqual(float(np.max(np.abs(contained[:, 1]))), 1.0)
+        self.assertAlmostEqual(float(np.max(np.abs(contained[:, 0]))), 0.98, places=5)
+
     def test_snapshot_request_defaults_to_configured_wallpaper_dimensions(self) -> None:
         request = SnapshotRequest(
             attractor_name="Lorenz",
@@ -102,6 +120,7 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertEqual((request.width, request.height), (SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT))
         self.assertEqual(request.fog, DEFAULT_FOG)
+        self.assertEqual(request.fit_mode, "cover")
 
     def test_snapshot_request_rejects_invalid_dimensions_and_sampling_parameters(self) -> None:
         kwargs = dict(
@@ -125,6 +144,8 @@ class SnapshotTests(unittest.TestCase):
             SnapshotRequest(**kwargs, sample_stride=0)
         with self.assertRaisesRegex(ValueError, "fog"):
             SnapshotRequest(**kwargs, fog=1.5)
+        with self.assertRaisesRegex(ValueError, "fit_mode"):
+            SnapshotRequest(**kwargs, fit_mode="stretch")
 
     def test_snapshot_filename_defaults_to_screenshot_folder(self) -> None:
         output = Path(snapshot_filename())
@@ -147,6 +168,17 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertGreater(warm_mean[0], warm_mean[2])
         self.assertGreater(cool_mean[2], cool_mean[0])
+
+    def test_dark_snapshot_presets_use_a_textured_backdrop_even_without_density(self) -> None:
+        density = np.zeros((24, 40), dtype=np.float32)
+
+        nebula = _render_density_image(density, 0.8, "nebula")
+        void = _render_density_image(density, 0.8, "void")
+
+        self.assertGreater(float(nebula.mean()), 0.01)
+        self.assertGreater(float(void.mean()), 0.01)
+        self.assertGreater(float(nebula.std()), 0.001)
+        self.assertGreater(float(void.std()), 0.001)
 
     def test_snapshot_preset_names_are_importable_from_config(self) -> None:
         self.assertEqual(set(SNAPSHOT_PRESET_NAMES), {"nebula", "blueprint", "void", "print"})

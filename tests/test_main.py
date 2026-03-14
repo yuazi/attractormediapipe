@@ -162,7 +162,7 @@ class MainModuleTests(unittest.TestCase):
 
         sys.modules.pop("main", None)
 
-    def test_run_snapshot_export_forwards_snapshot_dimensions(self) -> None:
+    def test_run_snapshot_export_forwards_snapshot_dimensions_and_fit_mode(self) -> None:
         sys.modules.pop("main", None)
         module = importlib.import_module("main")
 
@@ -181,6 +181,8 @@ class MainModuleTests(unittest.TestCase):
                 "7680",
                 "--snapshot-height",
                 "4320",
+                "--snapshot-fit",
+                "contain",
                 "--preset",
                 "blueprint",
             ]
@@ -194,6 +196,7 @@ class MainModuleTests(unittest.TestCase):
         self.assertEqual(result.textured_path, "/tmp/wallpaper_textured.png")
         self.assertEqual(captured["request"].width, 7680)
         self.assertEqual(captured["request"].height, 4320)
+        self.assertEqual(captured["request"].fit_mode, "contain")
         self.assertEqual(captured["request"].preset_name, "blueprint")
 
         sys.modules.pop("main", None)

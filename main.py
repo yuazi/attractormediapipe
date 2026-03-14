@@ -70,6 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--snapshot-samples", type=int, default=None, help="Override the default Datashader sample count")
     parser.add_argument("--snapshot-burn-in", type=int, default=None, help="Override the default Datashader burn-in steps")
     parser.add_argument("--snapshot-stride", type=int, default=None, help="Override the default Datashader sample stride")
+    parser.add_argument("--snapshot-fit", choices=("cover", "contain"), default="cover", help="Snapshot framing mode: cover fills the frame; contain keeps the full attractor in view")
     parser.add_argument("--preset", type=str, default=DEFAULT_SNAPSHOT_PRESET, help=f"Snapshot preset ({', '.join(SNAPSHOT_PRESET_NAMES)})")
     return parser.parse_args(argv)
 
@@ -369,6 +370,7 @@ def run_snapshot_export(args: argparse.Namespace):
             burn_in=burn_in,
             sample_stride=sample_stride,
             preset_name=preset_name,
+            fit_mode=args.snapshot_fit,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -479,6 +481,7 @@ def main(argv: list[str] | None = None) -> None:
                                 height=snapshot_height,
                                 state=manager.state_vector,
                                 preset_name=preset_name,
+                                fit_mode=args.snapshot_fit,
                             )
                         )
                     elif event.key == pygame.K_p:
