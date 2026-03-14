@@ -7,3 +7,27 @@ __pycache__/
 .numba_cache/
 .pytest_cache/
 .ruff_cache/
+
+# macOS / Finder
+.DS_Store
+**/.DS_Store
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Python tool/version files
+.python-version
+
+# Coverage outputs
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Editor / IDE state
+.vscode/
+.idea/
+*.swp
+*.swo
