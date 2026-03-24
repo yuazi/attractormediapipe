@@ -1,2 +1,4 @@
-*
+*.png
 !.gitignore
+!__init__.py
+!presets.py

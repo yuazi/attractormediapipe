@@ -26,6 +26,19 @@ env/
 htmlcov/
 coverage.xml
 
+# Generated snapshot metadata / exports
+assets/snapshot_log.jsonl
+assets/*_clean.png
+assets/*_textured.png
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local log files
+*.log
+
 # Editor / IDE state
 .vscode/
 .idea/
