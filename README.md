@@ -4,6 +4,8 @@ Interactive strange-attractor performance tool built with `pygame`, `moderngl`, 
 
 The app renders one attractor at a time as a glowing particle trail, lets you steer the scene with hand gestures or traditional controls, and exports high-resolution wallpaper snapshots with preset-based styling and embedded metadata.
 
+![App Demo](assets/demo.gif)
+
 ![Lorenz UI preview](assets/readme_lorenz_ui.png)
 
 ## What It Does
