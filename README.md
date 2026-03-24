@@ -6,8 +6,6 @@ The app renders one attractor at a time as a glowing particle trail, lets you st
 
 ![App Demo](assets/demo.gif)
 
-![Lorenz UI preview](assets/readme_lorenz_ui.png)
-
 ## What It Does
 
 At runtime, `attractormediapipe` combines three systems:
