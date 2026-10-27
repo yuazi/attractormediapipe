@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 
@@ -30,8 +29,6 @@ ACTIVE_ATTRACTOR_TYPES = (
     RosslerAttractor,
     HalvorsenAttractor,
 )
-
-INACTIVE_ATTRACTOR_TYPES = ()
 
 HUD_ACCENT_OVERRIDES: dict[str, tuple[int, int, int]] = {
     "Lorenz": (230, 57, 70),
@@ -143,60 +140,6 @@ def normalize_points(points: np.ndarray) -> np.ndarray:
     return centered / np.float32(max_extent)
 
 
-def rotation_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
-    yaw_r = math.radians(yaw)
-    pitch_r = math.radians(pitch)
-    roll_r = math.radians(roll)
-
-    rot_y = np.array(
-        [
-            [math.cos(yaw_r), 0.0, math.sin(yaw_r)],
-            [0.0, 1.0, 0.0],
-            [-math.sin(yaw_r), 0.0, math.cos(yaw_r)],
-        ],
-        dtype=np.float32,
-    )
-    rot_x = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, math.cos(pitch_r), -math.sin(pitch_r)],
-            [0.0, math.sin(pitch_r), math.cos(pitch_r)],
-        ],
-        dtype=np.float32,
-    )
-    rot_z = np.array(
-        [
-            [math.cos(roll_r), -math.sin(roll_r), 0.0],
-            [math.sin(roll_r), math.cos(roll_r), 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    return rot_z @ rot_x @ rot_y
-
-
-def perspective_project(
-    points: np.ndarray,
-    rotation: np.ndarray,
-    zoom: float,
-    screen_size: tuple[int, int],
-    *,
-    fov: float = 520.0,
-    camera_distance: float = 4.6,
-) -> tuple[np.ndarray, np.ndarray]:
-    if len(points) == 0:
-        return np.empty((0, 2), dtype=np.float32), np.empty((0,), dtype=np.float32)
-
-    width, height = screen_size
-    rotated = points @ rotation.T
-    z = rotated[:, 2] + camera_distance
-    z = np.clip(z, 0.2, None)
-    sx = rotated[:, 0] * zoom * fov / z + width * 0.5
-    sy = rotated[:, 1] * zoom * fov / z + height * 0.5
-    depths = np.clip(1.0 - (z - 0.2) / (camera_distance + 2.0), 0.15, 1.0)
-    return np.stack((sx, sy), axis=1).astype(np.float32, copy=False), depths.astype(np.float32, copy=False)
-
-
 class AttractorManager:
     def __init__(self, capacity: int = TRAIL_BUFFER_CAPACITY) -> None:
         self.capacity = capacity
@@ -271,21 +214,9 @@ class AttractorManager:
                 return index
         raise KeyError(name)
 
-    def get_attractor(self, index: int | None = None):
-        target_index = self.index if index is None else max(0, min(index, self.total - 1))
-        return self.attractors[target_index]
-
-    def clone_current(self):
-        return self.current.clone()
-
     def reset(self) -> None:
         self.current.reset()
         self.clear_trail(self.index)
-
-    def reset_all(self) -> None:
-        for index, attractor in enumerate(self.attractors):
-            attractor.reset()
-            self.clear_trail(index)
 
     def clear_trail(self, index: int | None = None) -> None:
         target_index = self.index if index is None else max(0, min(index, self.total - 1))
@@ -321,11 +252,6 @@ class AttractorManager:
         self._append_points(self.index, typed)
         self.current.set_state(final_state)
         return typed
-
-    def randomize_current_parameters(self, variation: float) -> dict[str, float]:
-        randomized = self.current.randomize_parameters(variation)
-        self.reset()
-        return randomized
 
     def prime_current_trail(self, *, sample_count: int | None = None, dt: float, burn_in: int = 0, sample_stride: int = 1) -> np.ndarray:
         count = self.capacity if sample_count is None else max(0, min(int(sample_count), self.capacity))
@@ -377,15 +303,6 @@ class AttractorManager:
         indices = (np.arange(take, dtype=np.int32) + start) % self.capacity
         return trail[indices].copy()
 
-    def get_render_data(self, limit: int) -> tuple[np.ndarray, np.ndarray]:
-        trail = self.get_recent_trail(limit)
-        normalized = normalize_points(trail)
-        if len(normalized) == 0:
-            return normalized, np.empty((0,), dtype=np.float32)
-        normalized *= np.float32(self.scale_hint)
-        ages = np.linspace(0.02, 1.0, num=len(normalized), dtype=np.float32)
-        return normalized.astype(np.float32, copy=False), ages
-
     def get_trail_render_state(self, limit: int) -> TrailRenderState:
         trail = self.get_recent_trail(limit)
         if len(trail) == 0:
@@ -410,23 +327,6 @@ class AttractorManager:
             count=len(positions),
         )
 
-    def get_projected_trail(
-        self,
-        limit: int,
-        yaw: float,
-        pitch: float,
-        roll: float,
-        zoom: float,
-        screen_size: tuple[int, int],
-    ) -> tuple[np.ndarray, np.ndarray]:
-        trail = self.get_recent_trail(limit)
-        if len(trail) == 0:
-            return np.empty((0, 2), dtype=np.float32), np.empty((0,), dtype=np.float32)
-        normalized = normalize_points(trail) * np.float32(self.scale_hint)
-        rotation = rotation_matrix(yaw, pitch, roll)
-        return perspective_project(normalized, rotation, zoom, screen_size)
-
-
 def create_active_attractor(name: str):
     normalized = name.strip().lower()
     for attractor_type in ACTIVE_ATTRACTOR_TYPES:
@@ -438,6 +338,3 @@ def create_active_attractor(name: str):
 def active_attractor_names() -> Sequence[str]:
     return tuple(attractor_type.name for attractor_type in ACTIVE_ATTRACTOR_TYPES)
 
-
-def inactive_attractor_names() -> Iterable[str]:
-    return tuple(attractor_type.name for attractor_type in INACTIVE_ATTRACTOR_TYPES)

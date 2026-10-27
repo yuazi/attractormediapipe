@@ -243,16 +243,9 @@ class HUDLayout:
 @dataclass
 class SceneState:
     positions: np.ndarray
-    ages: np.ndarray
     trail_center: tuple[float, float, float]
     trail_inv_extent: float
     trail_scale_hint: float
-    transition_positions: np.ndarray
-    transition_center: tuple[float, float, float]
-    transition_inv_extent: float
-    transition_scale_hint: float
-    transition_color: tuple[int, int, int]
-    transition_progress: float
     attractor_name: str
     attractor_color: tuple[int, int, int]
     attractor_index: int
@@ -563,18 +556,6 @@ class SceneRenderer:
             roll=state.roll,
             zoom=state.zoom,
         )
-        if len(state.transition_positions) > 0 and state.transition_progress < 1.0:
-            self._render_trail_points(
-                state.transition_positions,
-                center=state.transition_center,
-                inv_extent=state.transition_inv_extent,
-                scale_hint=state.transition_scale_hint,
-                color=state.transition_color,
-                luminosity=state.luminosity,
-                time_value=state.time_value,
-                fade=1.0 - state.transition_progress,
-                mvp=mvp,
-            )
         self._render_trail_points(
             state.positions,
             center=state.trail_center,
@@ -583,7 +564,7 @@ class SceneRenderer:
             color=state.attractor_color,
             luminosity=state.luminosity,
             time_value=state.time_value,
-            fade=state.transition_progress,
+            fade=1.0,
             mvp=mvp,
         )
 

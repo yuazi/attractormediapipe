@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image, ImageChops
 
 from config import DEFAULT_FOG, SNAPSHOT_HEIGHT, SNAPSHOT_PRESET_NAMES, SNAPSHOT_WIDTH
+import renderer.snapshot as snapshot_module
 from renderer.snapshot import (
     SnapshotController,
     SnapshotExportResult,
@@ -72,6 +73,40 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(clean_image.size, (640, 360))
                 self.assertEqual(textured_image.size, (640, 360))
                 self.assertIsNone(ImageChops.difference(clean_image, textured_image).getbbox())
+
+    def test_contain_export_frames_every_point_even_when_zoomed_in(self) -> None:
+        # Regression: points outside the live camera view were dropped before
+        # "contain" reframing, so Aizawa lost about 12% of itself even at default zoom.
+        ensure_snapshot_environment()
+        framed_counts = []
+        frame_points = snapshot_module._frame_snapshot_points
+
+        def counting_frame(points_2d, fit_mode):
+            framed_counts.append(len(points_2d))
+            return frame_points(points_2d, fit_mode)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            request = SnapshotRequest(
+                attractor_name="Aizawa",
+                yaw=0.0,
+                pitch=0.0,
+                roll=0.0,
+                zoom=2.5,
+                time_value=0.0,
+                luminosity=0.8,
+                output_path=str(Path(tmpdir) / "snapshot.png"),
+                width=320,
+                height=180,
+                sample_count=3000,
+                burn_in=500,
+                fit_mode="contain",
+            )
+            with mock.patch("renderer.snapshot.SNAPSHOT_LOG_PATH", str(Path(tmpdir) / "log.jsonl")), mock.patch(
+                "renderer.snapshot._frame_snapshot_points", side_effect=counting_frame
+            ):
+                export_attractor_snapshot(request)
+
+        self.assertEqual(framed_counts, [3000])
 
     def test_cover_frame_points_scales_to_cover_snapshot_canvas(self) -> None:
         points = np.array(

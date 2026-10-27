@@ -6,19 +6,19 @@ The app renders one attractor at a time as a glowing particle trail, lets you st
 
 ![App Demo](assets/demo.gif)
 
-## What It Does
+## How it works
 
-At runtime, `attractormediapipe` combines three systems:
+The app runs three parts together:
 
 1. A live simulation loop that advances one of nine chaotic systems in real time.
 2. A ModernGL renderer that draws the newest portion of the trail as additive point sprites over a procedural atmosphere.
-3. A camera + gesture layer that maps hand motion to camera rotation, speed, luminosity, fog, zoom, attractor switching, and reset/randomize actions.
+3. A camera and gesture layer that maps hand motion to camera rotation, speed, luminosity, fog, zoom, attractor switching and trail reset.
 
-When you press `S`, or run in `--snapshot-only` mode, the app switches to a Datashader export pipeline that generates millions of points, rasterizes them at wallpaper resolution, writes both clean and textured PNG variants, embeds descriptive PNG text metadata, and appends a JSONL archive entry to `assets/snapshot_log.jsonl`.
+Pressing `S`, or running with `--snapshot-only`, exports a snapshot through Datashader: it generates millions of points, rasterizes them at wallpaper resolution, writes a clean and a textured PNG with text metadata, and appends a line to `assets/snapshot_log.jsonl`.
 
-## Active Attractors
+## Attractors
 
-The viewer currently ships with nine attractors:
+Nine attractors are included:
 
 - Lorenz
 - Aizawa
@@ -36,26 +36,25 @@ Each attractor exposes:
 - A parameter dictionary for HUD display, preset metadata, and controlled randomization.
 - A GLSL-compatible parameter layout so the live renderer can use a GPU transform-feedback stepper when the active OpenGL context supports it.
 
-## Rendering Model
+## Live rendering
 
-The live renderer is built around a few layered ideas rather than a traditional mesh scene:
+The live view draws points, with no meshes:
 
 - The trail is stored as a ring buffer of 3D points.
 - The newest `100,000` points are normalized and drawn as additive point sprites.
 - Age-based fading is applied in the fragment shader instead of by mutating per-point alpha on the CPU.
 - A procedural background texture and separate fog veil keep the scene readable without flattening the attractor.
 - Attractor switches cut directly to the newly selected system.
-- When available, the live simulation can advance through a transform-feedback GPU stepper; if that path fails or is unsupported, the code falls back to the existing Numba CPU stepping path automatically.
+- The simulation steps on the GPU through transform feedback when the OpenGL context supports it. If that fails, it falls back to the Numba CPU stepper, so older graphics hardware still works.
+- Each attractor's trail buffer holds those same `100,000` points, so switching attractors refills it in a few milliseconds.
 
-This means the app remains usable on machines with modest graphics support, but can offload more work to the GPU when the context allows it.
+## Snapshot export
 
-## Snapshot Pipeline
-
-Snapshot export is intentionally different from the live render.
+A snapshot regenerates the attractor from the simulation instead of saving the live framebuffer, so it can be much denser than the live view.
 
 - It generates `5,000,000` points by default.
 - It defaults to `5120x2880`.
-- It uses Datashader for dense 2D accumulation rather than simply saving the live framebuffer.
+- Datashader accumulates the points into a 2D density image.
 - It produces two files for every export:
   - `*_clean.png`
   - `*_textured.png`
@@ -81,10 +80,10 @@ Each PNG includes these text metadata fields:
 
 Each export also appends a JSON object with the same information plus file paths to `assets/snapshot_log.jsonl`.
 
-## Main Features
+## Features
 
 - Real-time rendering of nine strange attractors.
-- MediaPipe-based left/right hand interpretation.
+- MediaPipe hand tracking, with different controls for the left and right hand.
 - Gesture-driven pinky touch actions for reset and attractor switching.
 - Smooth interpolation for speed, luminosity, fog, and zoom changes.
 - Ghost mode for freezing the trail while still orbiting the camera.
@@ -92,7 +91,7 @@ Each export also appends a JSON object with the same information plus file paths
 - Snapshot preset cycling in the live viewer.
 - Headless and snapshot-only export support.
 - GPU trail stepping path with CPU fallback.
-- Unittest regression coverage for controls, snapshots, renderer behavior, and GPU/CPU equivalence helpers.
+- Unit tests for controls, snapshots, renderer state and GPU/CPU stepper equivalence.
 
 ## Installation
 
@@ -102,7 +101,7 @@ Install the pinned dependency set:
 python3 -m pip install -r requirements.txt
 ```
 
-### Dependencies in plain language
+### What each dependency does
 
 - `pygame`: window creation, input handling, and the app loop.
 - `moderngl`: OpenGL context and shader management.
@@ -112,9 +111,9 @@ python3 -m pip install -r requirements.txt
 - `datashader` + `pandas`: high-resolution snapshot rasterization.
 - `Pillow`: HUD composition, image output, and PNG metadata writing.
 
-The project includes bundled fonts in `assets/fonts`, so a fresh checkout should render the intended UI typography without requiring system font setup.
+The UI fonts are bundled in `assets/fonts`, so no system font setup is needed.
 
-## Running The App
+## Running the app
 
 Start the interactive viewer:
 
@@ -140,13 +139,13 @@ Open on a specific camera index:
 python3 main.py --camera-index 1
 ```
 
-Render only a fixed number of frames, which is useful for smoke checks:
+Exit after a fixed number of frames (handy for a quick smoke test):
 
 ```bash
 python3 main.py --frames 300
 ```
 
-## Snapshot And Headless Usage
+## Snapshots and headless use
 
 Export a snapshot and exit:
 
@@ -166,15 +165,15 @@ Headless export uses the same snapshot renderer:
 python3 main.py --headless --attractor Chen --preset void --screenshot-path screenshot/chen_void.png
 ```
 
-### Important snapshot notes
+### Snapshot notes
 
 - `--headless` currently requires `--snapshot-only` or `--screenshot-path`.
 - Invalid preset names exit cleanly and print the valid preset list.
 - `--snapshot-fit cover` fills the frame and may crop; `--snapshot-fit contain` keeps the full attractor visible with margin.
 - Snapshot filenames default to the `screenshot/` directory with a timestamped base name.
-- If `--screenshot-path` is provided, the code preserves the `_clean` / `_textured` naming convention automatically.
+- With `--screenshot-path`, the `_clean` and `_textured` suffixes are still added.
 
-## CLI Reference
+## CLI reference
 
 | Flag | Meaning |
 | --- | --- |
@@ -197,8 +196,6 @@ python3 main.py --headless --attractor Chen --preset void --screenshot-path scre
 ## Controls
 
 ### Webcam gestures
-
-The app treats the left and right hands differently.
 
 | Gesture | Result |
 | --- | --- |
@@ -232,19 +229,16 @@ The app treats the left and right hands differently.
 | Mouse wheel | Zoom |
 | Drag slider tracks | Adjust speed, fog, luminosity, or scale from the HUD |
 
-## Performance-Oriented Interaction Notes
-
-These behaviors matter if you want to use the app as a live visual instrument rather than a static demo:
+## Live performance notes
 
 - Parameter changes are smoothed over `12` frames instead of snapping immediately.
 - Ghost mode freezes trail growth but keeps camera movement live, so you can orbit a fixed form.
 - Focus mode removes most chrome and shows a slim bottom bar with attractor name, preset, fps, and `GHOST` status.
-- Attractor changes switch immediately so performance gestures feel direct.
-- Preset changes update the status area immediately, even though the live renderer is not a literal Datashader preview.
+- Attractor changes take effect immediately.
+- The live view doesn't preview presets. Pressing `P` changes the preset used by the next export, and the status area shows its name.
 
-## UI Layout
+## HUD layout
 
-The default HUD is organized into a deliberate studio-style layout:
 
 - Top-left: current attractor position.
 - Top-center: title lockup.
@@ -255,14 +249,14 @@ The default HUD is organized into a deliberate studio-style layout:
 - Bottom-center: fps and state summary.
 - Bottom-right: picture-in-picture camera panel.
 
-The PiP camera panel stays part of the interface even when the live camera feed is hidden. When a camera is active, it shows a stylized preview with gesture overlays and short status captions near the active control regions.
+The picture-in-picture camera panel stays on screen even when the camera feed is hidden. With a camera active, it shows the feed with gesture overlays and short captions next to the active controls.
 
-## Project Structure
+## Project structure
 
 ```text
 .
 ├── attractors/         # one file per attractor + shared manager/base classes
-├── assets/             # fonts, model files, screenshots, export log
+├── assets/             # fonts, hand-tracking model, demo media, export log
 ├── hands/              # tracker, gesture logic, skeleton drawing
 ├── renderer/           # scene renderer, GPU stepper, snapshot export helpers
 ├── screenshot/         # snapshot preset definitions
@@ -272,44 +266,19 @@ The PiP camera panel stays part of the interface even when the live camera feed 
 └── requirements.txt    # pinned dependency set
 ```
 
-## Development Notes
+## Development notes
 
-### Why there are both CPU and GPU stepping paths
-
-The CPU path is still important:
-
-- It is the stable fallback when a system cannot support the transform-feedback route.
-- It powers snapshot generation.
-- It keeps tests deterministic and makes numerical equivalence checks easier.
-
-The GPU path exists to reduce per-frame Python overhead during steady-state live rendering.
-
-### Why snapshots are not just screenshots
-
-The live renderer is optimized for interactivity. The snapshot renderer is optimized for dense, printable output. That is why the exported images:
-
-- regenerate the attractor from simulation data,
-- use millions of points,
-- apply preset-based offline styling,
-- and embed metadata for later cataloging.
+The GPU stepper cuts per-frame Python overhead in the live view. The CPU stepper stays as the fallback, generates snapshot points, and gives the tests a deterministic reference to compare the GPU output against.
 
 ## Testing
 
-Run the regression suite with:
+Run the tests:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-The test suite covers:
-
-- attractor stability,
-- gesture timing and mappings,
-- snapshot output and metadata,
-- renderer state wiring,
-- and GPU/CPU stepper equivalence helpers.
-
-Some GPU-specific tests may skip automatically on machines that cannot create a standalone OpenGL context.
+They cover attractor stability, gesture timing and mappings, snapshot output and metadata, renderer state, and GPU/CPU stepper equivalence. GPU tests skip themselves on machines that can't create a standalone OpenGL context.
 
 ## Troubleshooting
 
@@ -334,4 +303,4 @@ If `--preset` uses an unknown name, rerun with one of:
 
 ### Slow first snapshot import
 
-Datashader and Matplotlib-related initialization can be slower on the first run. The exporter sets `NUMBA_CACHE_DIR` and `MPLCONFIGDIR` automatically to improve compatibility on systems where the default cache directories are not writable.
+The first export is slower while Datashader and Numba compile and cache. The exporter sets `NUMBA_CACHE_DIR` and `MPLCONFIGDIR` to temp folders, in case the default cache folders aren't writable.
