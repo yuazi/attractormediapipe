@@ -117,16 +117,9 @@ class SceneRendererTests(unittest.TestCase):
 
         state = SceneState(
             positions=np.array([[0.1, -0.2, 0.3]], dtype=np.float32),
-            ages=np.array([0.6], dtype=np.float32),
             trail_center=(0.0, 0.0, 0.0),
             trail_inv_extent=1.0,
             trail_scale_hint=1.0,
-            transition_positions=np.empty((0, 3), dtype=np.float32),
-            transition_center=(0.0, 0.0, 0.0),
-            transition_inv_extent=1.0,
-            transition_scale_hint=1.0,
-            transition_color=(255, 88, 88),
-            transition_progress=1.0,
             attractor_name="Lorenz",
             attractor_color=(255, 88, 88),
             attractor_index=0,

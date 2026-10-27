@@ -10,7 +10,7 @@ from attractors.dadras import DadrasAttractor
 from attractors.halvorsen import HalvorsenAttractor
 from attractors.langford import LangfordAttractor
 from attractors.lorenz import LorenzAttractor
-from attractors.manager import AttractorManager, create_active_attractor, normalize_points, perspective_project, rotation_matrix
+from attractors.manager import AttractorManager, create_active_attractor, normalize_points
 from attractors.rossler import RosslerAttractor
 from attractors.sprott_b import SprottBAttractor
 from attractors.thomas import ThomasAttractor
@@ -100,15 +100,6 @@ class AttractorTests(unittest.TestCase):
             manager.switch_to(index)
             self.assertEqual(manager.placard.equation, expected_equations[name])
 
-    def test_manager_projection_shapes_are_stable(self) -> None:
-        manager = self.make_manager()
-        manager.step_many(0.005, 64)
-        points_2d, depths = manager.get_projected_trail(48, 25.0, -10.0, 5.0, 1.4, (1280, 720))
-        self.assertEqual(points_2d.shape, (48, 2))
-        self.assertEqual(depths.shape, (48,))
-        self.assertTrue(np.isfinite(points_2d).all())
-        self.assertTrue(np.isfinite(depths).all())
-
     def test_switching_resets_selected_attractor_trail(self) -> None:
         manager = self.make_manager()
         manager.step_many(0.005, 12)
@@ -120,29 +111,16 @@ class AttractorTests(unittest.TestCase):
         manager.switch_to(3)
         self.assertEqual(manager.count, 0)
 
-    def test_reset_all_clears_all_trails(self) -> None:
-        manager = self.make_manager()
-        for _ in range(manager.total):
-            manager.step_many(0.005, 8)
-            manager.switch_relative(1)
-        manager.reset_all()
-        self.assertTrue(all(manager.get_recent_trail(index=index).size == 0 for index in range(manager.total)))
-
-    def test_render_data_and_normalization_helpers(self) -> None:
+    def test_trail_render_state_and_normalization_helpers(self) -> None:
         manager = self.make_manager()
         manager.step_many(0.005, 96)
-        render_points, ages = manager.get_render_data(64)
-        self.assertEqual(render_points.shape, (64, 3))
-        self.assertEqual(ages.shape, (64,))
-        self.assertTrue(np.isfinite(render_points).all())
-        self.assertTrue(np.isfinite(ages).all())
+        state = manager.get_trail_render_state(64)
+        self.assertEqual(state.positions.shape, (64, 3))
+        self.assertTrue(np.isfinite(state.positions).all())
 
         points = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float32)
         normalized = normalize_points(points)
-        rotation = rotation_matrix(0.0, 0.0, 0.0)
-        projected, depths = perspective_project(normalized, rotation, 1.0, (640, 480))
-        self.assertEqual(projected.shape, (3, 2))
-        self.assertEqual(depths.shape, (3,))
+        self.assertAlmostEqual(float(np.max(np.abs(normalized))), 1.0, places=5)
 
     def test_factory_creates_langford_case_insensitively(self) -> None:
         attractor = create_active_attractor("langford")
@@ -166,9 +144,7 @@ class AttractorTests(unittest.TestCase):
         self.assertEqual(manager.count, 512)
         self.assertEqual(manager.get_recent_trail().shape, (512, 3))
         self.assertNotEqual(manager.state_vector, initial_state)
-        render_points, ages = manager.get_render_data(64)
-        self.assertEqual(render_points.shape, (64, 3))
-        self.assertEqual(ages.shape, (64,))
+        self.assertEqual(manager.get_trail_render_state(64).positions.shape, (64, 3))
 
     def test_sample_points_rejects_invalid_sampling_parameters(self) -> None:
         attractor = LorenzAttractor()

@@ -388,16 +388,19 @@ def export_attractor_snapshot(request: SnapshotRequest) -> SnapshotExportResult:
     if ndc.size == 0:
         raise RuntimeError("Snapshot export projected all points outside the view frustum")
 
-    in_bounds = (
-        (ndc[:, 0] >= -1.05)
-        & (ndc[:, 0] <= 1.05)
-        & (ndc[:, 1] >= -1.05)
-        & (ndc[:, 1] <= 1.05)
-    )
-    if not np.any(in_bounds):
-        raise RuntimeError("Snapshot export produced no visible points in bounds")
+    # Only "cover" crops to the live camera view; "contain" has to see the whole attractor.
+    if request.fit_mode == "cover":
+        in_bounds = (
+            (ndc[:, 0] >= -1.05)
+            & (ndc[:, 0] <= 1.05)
+            & (ndc[:, 1] >= -1.05)
+            & (ndc[:, 1] <= 1.05)
+        )
+        if not np.any(in_bounds):
+            raise RuntimeError("Snapshot export produced no visible points in bounds")
+        ndc = ndc[in_bounds]
 
-    framed = _frame_snapshot_points(ndc[in_bounds, :2], request.fit_mode)
+    framed = _frame_snapshot_points(ndc[:, :2], request.fit_mode)
     reframed_in_bounds = (
         (framed[:, 0] >= -1.0)
         & (framed[:, 0] <= 1.0)

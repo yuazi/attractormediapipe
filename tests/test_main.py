@@ -150,14 +150,13 @@ class MainModuleTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.limit = None
 
-            def get_render_data(self, limit: int):
+            def get_trail_render_state(self, limit: int):
                 self.limit = limit
-                return "positions", "ages"
+                return "trail-state"
 
         manager = FakeManager()
-        positions, ages = module._get_live_render_data(manager)
 
-        self.assertEqual((positions, ages), ("positions", "ages"))
+        self.assertEqual(module._get_live_trail_state(manager), "trail-state")
         self.assertEqual(manager.limit, module.FIXED_TRAIL_LENGTH)
 
         sys.modules.pop("main", None)

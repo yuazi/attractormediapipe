@@ -5,8 +5,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from attractors import AttractorManager, active_attractor_names
 from config import (
     CAMERA_CAPTURE_FPS,
@@ -24,7 +22,6 @@ from config import (
     FIXED_TRAIL_LENGTH,
     FOG_RANGE,
     FOG_STEP_DELTA,
-    HAND_TRACKING_FPS,
     MAX_SPEED_POINTS_PER_MINUTE,
     PRESET_HUD_FLASH_SECONDS,
     SCALE_RANGE,
@@ -303,10 +300,6 @@ def _consume_sample_budget(sample_budget: float, speed: float, frame_delta: floa
     return steps, updated_budget - steps
 
 
-def _get_live_render_data(manager: AttractorManager) -> tuple[object, object]:
-    return manager.get_render_data(FIXED_TRAIL_LENGTH)
-
-
 def _apply_slider_control(controls: ControlState, slider_id: str, value: float) -> None:
     if slider_id == "speed":
         controls.set_target("speed", value)
@@ -382,14 +375,9 @@ def run_snapshot_export(args: argparse.Namespace):
 def _prime_live_trail(manager: AttractorManager) -> None:
     manager.prime_current_trail(
         dt=DEFAULT_DT,
-        sample_count=SNAPSHOT_SAMPLES,
         burn_in=SNAPSHOT_BURN_IN,
         sample_stride=SNAPSHOT_SAMPLE_STRIDE,
     )
-
-
-def _restart_current_trail(manager: AttractorManager) -> None:
-    manager.reset()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -464,7 +452,7 @@ def main(argv: list[str] | None = None) -> None:
                         if controls.ghost_mode:
                             controls.paused = False
                     elif event.key == pygame.K_r:
-                        _restart_current_trail(manager)
+                        manager.reset()
                         sample_budget = 0.0
                     elif event.key == pygame.K_s:
                         snapshotter.start(
@@ -537,7 +525,7 @@ def main(argv: list[str] | None = None) -> None:
                             active_slider = None
                         elif renderer.reset_button_hit_test(manager.names, event.pos):
                             active_slider = None
-                            _restart_current_trail(manager)
+                            manager.reset()
                             sample_budget = 0.0
                         else:
                             active_slider = renderer.control_hit_test(manager.names, event.pos)
@@ -610,7 +598,7 @@ def main(argv: list[str] | None = None) -> None:
             if gesture_frame.reset_current:
                 left_pip_caption_text = "Reset"
                 left_pip_caption_until = time.monotonic() + SWITCH_CAPTION_DURATION
-                _restart_current_trail(manager)
+                manager.reset()
                 sample_budget = 0.0
             if gesture_frame.scene_delta:
                 switch_now = time.monotonic()
@@ -644,7 +632,6 @@ def main(argv: list[str] | None = None) -> None:
                     else:
                         manager.step_many(step_dt, steps)
             trail_state = _get_live_trail_state(manager)
-            ages = np.empty((0,), dtype=np.float32)
             caption_now = time.monotonic()
             left_pip_caption = left_pip_caption_text if caption_now < left_pip_caption_until else "Speed"
             right_pip_caption = right_pip_caption_text if caption_now < right_pip_caption_until else "Scale"
@@ -653,7 +640,6 @@ def main(argv: list[str] | None = None) -> None:
             renderer.draw(
                 SceneState(
                     positions=trail_state.positions,
-                    ages=ages,
                     attractor_name=manager.name,
                     attractor_color=manager.color,
                     attractor_index=manager.index,
@@ -701,12 +687,6 @@ def main(argv: list[str] | None = None) -> None:
                     trail_center=trail_state.center,
                     trail_inv_extent=trail_state.inv_extent,
                     trail_scale_hint=trail_state.scale_hint,
-                    transition_positions=np.empty((0, 3), dtype=np.float32),
-                    transition_center=(0.0, 0.0, 0.0),
-                    transition_inv_extent=1.0,
-                    transition_scale_hint=1.0,
-                    transition_progress=1.0,
-                    transition_color=manager.color,
                 )
             )
 
